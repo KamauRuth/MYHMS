@@ -24,7 +24,7 @@ const btnPrimary = { ...btn, background: "#111", color: "#fff" }
 ========================= */
 const DANGER_KEYWORDS = [
   "malaria",
-  "typhoid fever",
+  "typhoid",
   "meningitis",
   "sepsis",
   "pneumonia",
@@ -36,9 +36,18 @@ const DANGER_KEYWORDS = [
 ]
 
 const isDangerDiagnosis = (title = "") =>
-  DANGER_KEYWORDS.some(k =>
-    title.toLowerCase().includes(k)
-  )
+  DANGER_KEYWORDS.some(k => title.toLowerCase().includes(k))
+
+/* =========================
+   ICD → LAB MAP
+========================= */
+const ICD_LAB_MAP = {
+  malaria: ["Malaria smear", "RDT malaria"],
+  typhoid: ["Widal test", "Blood culture"],
+  pneumonia: ["Chest X-ray", "Full blood count"],
+  tuberculosis: ["GeneXpert", "Sputum AFB"],
+  cholera: ["Stool culture", "Electrolytes"],
+}
 
 /* =========================
    COMPONENT
@@ -63,36 +72,41 @@ export default function OPDVisit() {
   /* ICD */
   const [icdResults, setIcdResults] = useState([])
   const [selectedICD, setSelectedICD] = useState(null)
+  const [activeIndex, setActiveIndex] = useState(-1)
+  const [diagnosisLocked, setDiagnosisLocked] = useState(false)
 
-  /* LAB + PHARMACY */
+  /* LAB */
   const [labs, setLabs] = useState([""])
+  const [labRequests, setLabRequests] = useState([])
+  const [suggestedLabs, setSuggestedLabs] = useState([])
+  const [hasPendingLabs, setHasPendingLabs] = useState(false)
+
+  /* PHARMACY */
   const [drugs, setDrugs] = useState([{ name: "", dose: "", frequency: "" }])
 
+  /* FINAL ACTIONS */
+  const [closing, setClosing] = useState(false)
+
   /* =========================
-     LOAD VISIT + TRIAGE + HISTORY
+     LOAD VISIT + TRIAGE
   ========================== */
   useEffect(() => {
     const load = async () => {
-      setLoading(true)
-
-      const { data: visitData, error: visitErr } = await supabase
+      const { data: visitData, error } = await supabase
         .from("visits")
         .select(`
           id,
           visit_no,
-          patient_id,
           patient:patients (
             id,
-            patient_no,
             first_name,
-            last_name,
-            gender
+            last_name
           )
         `)
         .eq("id", visitId)
         .single()
 
-      if (visitErr || !visitData) {
+      if (error || !visitData) {
         alert("Visit not found")
         navigate("/opd")
         return
@@ -106,24 +120,9 @@ export default function OPDVisit() {
         .limit(1)
         .maybeSingle()
 
-      const { data: lastConsult } = await supabase
-        .from("consultations")
-        .select("*")
-        .eq("patient_id", visitData.patient.id)
-        .order("created_at", { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
       setVisit(visitData)
       setPatient(visitData.patient)
       setTriage(triageData)
-
-      if (lastConsult) {
-        setChiefComplaint(lastConsult.chief_complaint || "")
-        setHPI(lastConsult.history_of_present_illness || "")
-        setExamination(lastConsult.examination || "")
-      }
-
       setLoading(false)
     }
 
@@ -131,50 +130,91 @@ export default function OPDVisit() {
   }, [visitId, navigate])
 
   /* =========================
-     WHO ICD-11 SEARCH
+     LOAD LAB REQUESTS
   ========================== */
   useEffect(() => {
-    if (diagnosis.trim().length < 3) {
+    const loadLabs = async () => {
+      const { data } = await supabase
+        .from("lab_requests")
+        .select("*")
+        .eq("visit_id", visitId)
+        .order("created_at", { ascending: true })
+
+      setLabRequests(data || [])
+      setHasPendingLabs((data || []).some(l => l.status !== "DONE"))
+    }
+
+    loadLabs()
+  }, [visitId])
+
+  /* =========================
+     ICD SEARCH
+  ========================== */
+  useEffect(() => {
+    if (diagnosisLocked || diagnosis.trim().length < 3) {
       setIcdResults([])
+      setActiveIndex(-1)
       return
     }
 
     const timer = setTimeout(async () => {
-      try {
-        const res = await fetch(
-          `${API}/api/icd11/search?q=${encodeURIComponent(diagnosis)}`
-        )
-
-        if (!res.ok) throw new Error("ICD search failed")
-
-        const data = await res.json()
-
-        const cleaned = (Array.isArray(data) ? data : [])
-          .filter(d =>
-            d.code &&
-            d.title &&
-            !d.title.toLowerCase().includes("vaccine") &&
-            !d.title.toLowerCase().includes("screening") &&
-            !d.title.toLowerCase().includes("history of")
-          )
-          .slice(0, 8)
-
-        setIcdResults(cleaned)
-      } catch (err) {
-        console.warn("ICD-11 error:", err.message)
-        setIcdResults([])
-      }
+      const res = await fetch(
+        `${API}/api/icd11/suggest?q=${encodeURIComponent(diagnosis)}`
+      )
+      const data = await res.json()
+      setIcdResults(Array.isArray(data) ? data.slice(0, 8) : [])
     }, 400)
 
     return () => clearTimeout(timer)
-  }, [diagnosis, API])
+  }, [diagnosis, diagnosisLocked, API])
+
+  const handleDiagnosisKeyDown = e => {
+    if (!icdResults.length) return
+
+    if (e.key === "ArrowDown") {
+      e.preventDefault()
+      setActiveIndex(i => Math.min(i + 1, icdResults.length - 1))
+    }
+
+    if (e.key === "ArrowUp") {
+      e.preventDefault()
+      setActiveIndex(i => Math.max(i - 1, 0))
+    }
+
+    if (e.key === "Enter") {
+      e.preventDefault()
+      selectDiagnosis(icdResults[activeIndex] || icdResults[0])
+    }
+  }
+
+  const selectDiagnosis = async r => {
+    setDiagnosis(r.title)
+    setSelectedICD(r)
+    setDiagnosisLocked(true)
+    setIcdResults([])
+    setActiveIndex(-1)
+
+    const key = Object.keys(ICD_LAB_MAP).find(k =>
+      r.title.toLowerCase().includes(k)
+    )
+    if (key) setSuggestedLabs(ICD_LAB_MAP[key])
+
+    if (isDangerDiagnosis(r.title) && triage?.severity !== "HIGH") {
+      await supabase
+        .from("triage")
+        .update({ severity: "HIGH" })
+        .eq("visit_id", visitId)
+
+      setTriage(t => ({ ...t, severity: "HIGH" }))
+    }
+  }
 
   /* =========================
      ACTIONS
   ========================== */
   const saveConsultation = async () => {
     if (!selectedICD) {
-      alert("Please select a diagnosis from the list")
+      alert("Please select a diagnosis")
       return
     }
 
@@ -197,13 +237,15 @@ export default function OPDVisit() {
     const clean = labs.filter(Boolean)
     if (!clean.length) return alert("Add at least one lab test")
 
-    await supabase.from("lab_requests").insert({
-      visit_id: visitId,
-      tests: clean,
-    })
+    await supabase.from("lab_requests").insert(
+      clean.map(test => ({
+        visit_id: visitId,
+        test_name: test,
+        status: "PENDING",
+      }))
+    )
 
     alert("Sent to lab")
-    navigate("/opd")
   }
 
   const sendPrescription = async () => {
@@ -216,7 +258,63 @@ export default function OPDVisit() {
     })
 
     alert("Sent to pharmacy")
+  }
+
+  const closeConsultation = async () => {
+    if (!selectedICD) {
+      alert("Diagnosis required before closing consultation")
+      return
+    }
+
+    setClosing(true)
+
+    await supabase
+      .from("consultations")
+      .update({
+        status: "CLOSED",
+        closed_at: new Date().toISOString(),
+      })
+      .eq("visit_id", visitId)
+
+    await supabase
+      .from("visits")
+      .update({ status: "COMPLETED" })
+      .eq("id", visitId)
+
+    alert("Consultation closed")
     navigate("/opd")
+  }
+
+  const admitToIPD = async () => {
+    if (!selectedICD) {
+      alert("Diagnosis required before admission")
+      return
+    }
+
+    setClosing(true)
+
+    await supabase.from("ipd_admissions").insert({
+      visit_id: visitId,
+      patient_id: patient.id,
+      admitted_at: new Date().toISOString(),
+      status: "ACTIVE",
+    })
+
+    await supabase
+      .from("consultations")
+      .update({
+        status: "CLOSED",
+        closed_at: new Date().toISOString(),
+      })
+      .eq("visit_id", visitId)
+
+    await supabase
+      .from("visits")
+      .update({ status: "ADMITTED" })
+      .eq("id", visitId)
+
+    alert("Patient admitted to IPD")
+    navigate("/ipd")
   }
 
   /* =========================
@@ -226,14 +324,7 @@ export default function OPDVisit() {
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
-
       <h2>{visit.visit_no} — {patient.first_name} {patient.last_name}</h2>
-
-      {triage?.severity === "HIGH" && (
-        <div style={{ background: "#ffe5e5", padding: 10, borderRadius: 8 }}>
-          🚨 HIGH SEVERITY — PRIORITY PATIENT
-        </div>
-      )}
 
       {triage && (
         <div style={{ fontSize: 13 }}>
@@ -259,40 +350,48 @@ export default function OPDVisit() {
       <h4>Diagnosis (ICD-11)</h4>
 
       <input
-        style={input}
-        placeholder="Type diagnosis (e.g. malaria)"
+        style={{
+          ...input,
+          background: hasPendingLabs ? "#f5f5f5" : "#fff",
+        }}
+        disabled={hasPendingLabs}
+        placeholder={
+          hasPendingLabs
+            ? "Diagnosis locked until labs reviewed"
+            : "Type diagnosis (e.g. malaria)"
+        }
         value={diagnosis}
         onChange={e => {
           setDiagnosis(e.target.value)
           setSelectedICD(null)
+          setDiagnosisLocked(false)
         }}
+        onKeyDown={handleDiagnosisKeyDown}
       />
 
-      {icdResults.map(r => {
-        const danger = isDangerDiagnosis(r.title)
-        return (
-          <div
-            key={r.code}
-            onClick={() => {
-              setDiagnosis(r.title)
-              setSelectedICD(r)
-              setIcdResults([])
-            }}
-            style={{
-              padding: "10px",
-              cursor: "pointer",
-              background: danger ? "#fff1f1" : "#fff",
-              borderLeft: danger ? "4px solid crimson" : "4px solid #ddd",
-            }}
-          >
-            <b>{r.title}</b>
-            <div style={{ fontSize: 12, opacity: 0.7 }}>
-              ICD-11: {r.code}
-              {danger && " ⚠ HIGH-RISK"}
-            </div>
+      {icdResults.map((r, i) => (
+        <div
+          key={r.code}
+          onClick={() => selectDiagnosis(r)}
+          style={{
+            padding: 10,
+            cursor: "pointer",
+            background: i === activeIndex ? "#eef" : "#fff",
+            borderLeft: isDangerDiagnosis(r.title)
+              ? "4px solid crimson"
+              : "4px solid #ddd",
+          }}
+        >
+          <b>{r.title}</b>
+          <div style={{ fontSize: 12 }}>
+            ICD-11: {r.code}
           </div>
-        )
-      })}
+        </div>
+      ))}
+
+      {suggestedLabs.length > 0 && (
+        <div>🧠 Suggested labs: {suggestedLabs.join(", ")}</div>
+      )}
 
       <textarea style={input} placeholder="Doctor Notes"
         value={notes}
@@ -303,8 +402,9 @@ export default function OPDVisit() {
       </button>
 
       <h3>Send to Lab</h3>
+
       {labs.map((l, i) => (
-        <input key={`lab-${i}`} style={input} value={l}
+        <input key={i} style={input} value={l}
           placeholder="Lab test"
           onChange={e => {
             const c = [...labs]
@@ -312,29 +412,38 @@ export default function OPDVisit() {
             setLabs(c)
           }} />
       ))}
+
       <button onClick={() => setLabs([...labs, ""])}>+ Add Lab</button>
       <button style={btnPrimary} onClick={sendLab}>Send to Lab</button>
 
       <h3>Prescription</h3>
+
       {drugs.map((d, i) => (
-        <div key={`drug-${i}`} style={{ display: "grid", gap: 6 }}>
+        <div key={i}>
           <input style={input} placeholder="Drug"
             value={d.name}
             onChange={e => {
-              const c = [...drugs]; c[i].name = e.target.value; setDrugs(c)
+              const c = [...drugs]
+              c[i].name = e.target.value
+              setDrugs(c)
             }} />
           <input style={input} placeholder="Dose"
             value={d.dose}
             onChange={e => {
-              const c = [...drugs]; c[i].dose = e.target.value; setDrugs(c)
+              const c = [...drugs]
+              c[i].dose = e.target.value
+              setDrugs(c)
             }} />
           <input style={input} placeholder="Frequency"
             value={d.frequency}
             onChange={e => {
-              const c = [...drugs]; c[i].frequency = e.target.value; setDrugs(c)
+              const c = [...drugs]
+              c[i].frequency = e.target.value
+              setDrugs(c)
             }} />
         </div>
       ))}
+
       <button onClick={() => setDrugs([...drugs, { name: "", dose: "", frequency: "" }])}>
         + Add Drug
       </button>
@@ -342,7 +451,28 @@ export default function OPDVisit() {
         Send to Pharmacy
       </button>
 
-      <button style={btn} onClick={() => navigate("/opd")}>← Back</button>
+      {/* ✅ FINAL ACTIONS — EXACTLY HERE */}
+      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+        <button
+          style={{ ...btn, background: "#0a7", color: "#fff" }}
+          disabled={closing}
+          onClick={admitToIPD}
+        >
+          🏥 Admit to IPD
+        </button>
+
+        <button
+          style={{ ...btn, background: "#444", color: "#fff" }}
+          disabled={closing}
+          onClick={closeConsultation}
+        >
+          ✅ Close Consultation
+        </button>
+      </div>
+
+      <button style={btn} onClick={() => navigate("/opd")}>
+        ← Back
+      </button>
     </div>
   )
 }

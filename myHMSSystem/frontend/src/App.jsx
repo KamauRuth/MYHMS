@@ -6,6 +6,8 @@ import TriageHome from "./pages/Triage/TriageHome"
 import ReceptionHome from "./pages/Reception/ReceptionHome"
 import OPDHome from "./pages/OPD/OPDHome"
 import OPDVisit from "./pages/OPD/OPDVisit"
+import LabHome from "./pages/Laboratory/LabHome"
+import LabWork from "./pages/Laboratory/LabWork"
 
 function App() {
   return (
@@ -29,6 +31,14 @@ function App() {
       {/* OPD */}
       <Route path="/opd" element={<OPDHome />} />
       <Route path="/opd/:visitId" element={<OPDVisit />} />
+
+      {/* LABORATORY */}
+      <Route path="/lab" element={<Navigate to="/lab/queue" replace />} />
+      <Route path="/lab/queue" element={<LabHome />} />
+      <Route path="/lab/:labId" element={<LabWork />} />   
+
+
+
     </Routes>
   )
 }
