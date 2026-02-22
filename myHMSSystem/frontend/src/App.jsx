@@ -8,6 +8,8 @@ import OPDHome from "./pages/OPD/OPDHome"
 import OPDVisit from "./pages/OPD/OPDVisit"
 import LabHome from "./pages/Laboratory/LabHome"
 import LabWork from "./pages/Laboratory/LabWork"
+import TheatreHome from "./pages/Theatre/TheatreHome"
+import CaseDetails from "./pages/Theatre/caseDetails"
 
 function App() {
   return (
@@ -36,6 +38,11 @@ function App() {
       <Route path="/lab" element={<Navigate to="/lab/queue" replace />} />
       <Route path="/lab/queue" element={<LabHome />} />
       <Route path="/lab/:labId" element={<LabWork />} />   
+
+      {/* THEATRE */}
+      <Route path="/theatre" element={<TheatreHome />} />
+      <Route path="/theatre/case/:caseId" element={<CaseDetails />} />
+
 
 
 

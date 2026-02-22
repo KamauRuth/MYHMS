@@ -84,6 +84,50 @@ export default function OPDVisit() {
   /* PHARMACY */
   const [drugs, setDrugs] = useState([{ name: "", dose: "", frequency: "" }])
 
+  /* =========================
+   THEATRE ADDITION
+========================= */
+const [showBooking, setShowBooking] = useState(false)
+const [procedure, setProcedure] = useState("")
+const [urgency, setUrgency] = useState("ELECTIVE")
+const [preferredDate, setPreferredDate] = useState("")
+const [estimatedDuration, setEstimatedDuration] = useState("")
+
+const generateBookingId = () =>
+  `LPH-OT-${Math.floor(1000 + Math.random() * 9000)}`
+
+const bookForSurgery = async () => {
+  if (!selectedICD) {
+    alert("Diagnosis required before booking surgery")
+    return
+  }
+
+  if (!procedure || !preferredDate) {
+    alert("Procedure and preferred date required")
+    return
+  }
+
+  const { error } = await supabase.from("theatre_bookings").insert({
+    booking_id: generateBookingId(),
+    patient_id: patient.id,
+    visit_id: visitId,
+    source: "OPD",
+    procedure_name: procedure,
+    urgency,
+    preferred_date: preferredDate,
+    estimated_duration_minutes: parseInt(estimatedDuration) || 0,
+    status: "BOOKED",
+  })
+
+  if (error) {
+    alert("Failed to book surgery")
+    return
+  }
+
+  alert("Surgery booked successfully")
+  setShowBooking(false)
+}
+
   /* FINAL ACTIONS */
   const [closing, setClosing] = useState(false)
 
@@ -451,8 +495,74 @@ export default function OPDVisit() {
         Send to Pharmacy
       </button>
 
+    {showBooking && (
+    <div style={{
+      position: "fixed",
+      inset: 0,
+      background: "rgba(0,0,0,0.4)",
+      display: "flex",
+      justifyContent: "center",
+      alignItems: "center"
+    }}>
+      <div style={{
+        background: "#fff",
+        padding: 20,
+        borderRadius: 12,
+        width: 400,
+        display: "grid",
+        gap: 10
+      }}>
+        <h3>Book Surgery</h3>
+
+        <input
+          style={input}
+          placeholder="Procedure Name"
+          value={procedure}
+          onChange={e => setProcedure(e.target.value)}
+        />
+
+        <select
+          style={input}
+          value={urgency}
+          onChange={e => setUrgency(e.target.value)}
+        >
+          <option value="ELECTIVE">Elective</option>
+          <option value="EMERGENCY">Emergency</option>
+        </select>
+
+        <input
+          type="date"
+          style={input}
+          value={preferredDate}
+          onChange={e => setPreferredDate(e.target.value)}
+        />
+
+        <input
+          style={input}
+          placeholder="Estimated Duration (minutes)"
+          value={estimatedDuration}
+          onChange={e => setEstimatedDuration(e.target.value)}
+        />
+
+        <button style={btnPrimary} onClick={bookForSurgery}>
+          Confirm Booking
+        </button>
+
+        <button style={btn} onClick={() => setShowBooking(false)}>
+          Cancel
+        </button>
+      </div>
+    </div>
+  )}
+
       {/* ✅ FINAL ACTIONS — EXACTLY HERE */}
       <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+            <button
+    style={{ ...btn, background: "#9333ea", color: "#fff" }}
+    onClick={() => setShowBooking(true)}
+  >
+    🏥 Book for Surgery
+</button>
         <button
           style={{ ...btn, background: "#0a7", color: "#fff" }}
           disabled={closing}
@@ -460,6 +570,8 @@ export default function OPDVisit() {
         >
           🏥 Admit to IPD
         </button>
+
+    
 
         <button
           style={{ ...btn, background: "#444", color: "#fff" }}
