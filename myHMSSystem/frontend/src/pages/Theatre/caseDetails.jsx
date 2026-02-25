@@ -1,314 +1,269 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useCallback, useRef } from "react"
 import { useParams } from "react-router-dom"
 import { supabase } from "../../services/supabase"
 
-const input = {
+const containerStyle = {
+  padding: 24,
+  display: "grid",
+  gap: 24,
+  background: "#f8fafc",
+  minHeight: "100vh"
+}
+
+const panelStyle = {
+  background: "#fff",
+  padding: 20,
+  borderRadius: 12,
+  boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+  display: "grid",
+  gap: 12
+}
+
+const inputStyle = {
   padding: 10,
   borderRadius: 8,
   border: "1px solid #ddd",
-  width: "100%",
-  marginBottom: 10
+  width: "100%"
 }
 
-export default function CaseDetails() {
+export default function CaseDetails({ currentUser }) {
   const { caseId } = useParams()
 
-  /* ================= SURGEON ================= */
+  const [caseData, setCaseData] = useState(null)
   const [notes, setNotes] = useState({})
-
-  /* ================= ANESTHESIA ================= */
   const [anesthesia, setAnesthesia] = useState({})
-  const [vitals, setVitals] = useState([])
-  const [drugs, setDrugs] = useState([])
-  const [newVital, setNewVital] = useState({})
-  const [newDrug, setNewDrug] = useState({})
-
+  const [billing, setBilling] = useState({})
+  const [auditLogs, setAuditLogs] = useState([])
   const [loading, setLoading] = useState(true)
+  const [actionLoading, setActionLoading] = useState(false)
+
+  const saveTimeout = useRef(null)
+
+  /* ================= LOAD DATA ================= */
+
+  const loadAll = useCallback(async () => {
+    setLoading(true)
+
+    const [
+      { data: caseRow },
+      { data: notesRow },
+      { data: anesthesiaRow },
+      { data: billingRow },
+      { data: auditRows }
+    ] = await Promise.all([
+      supabase.from("theatre_cases").select("*").eq("id", caseId).single(),
+      supabase.from("surgery_notes").select("*").eq("case_id", caseId).maybeSingle(),
+      supabase.from("anesthesia_records").select("*").eq("case_id", caseId).maybeSingle(),
+      supabase.from("theatre_billing").select("*").eq("case_id", caseId).maybeSingle(),
+      supabase.from("theatre_audit_logs").select("*").eq("case_id", caseId).order("created_at", { ascending: false })
+    ])
+
+    setCaseData(caseRow)
+    setNotes(notesRow || {})
+    setAnesthesia(anesthesiaRow || {})
+    setBilling(billingRow || {})
+    setAuditLogs(auditRows || [])
+
+    setLoading(false)
+  }, [caseId])
 
   useEffect(() => {
     loadAll()
-  }, [])
+  }, [loadAll])
 
-  const loadAll = async () => {
-    await loadNotes()
-    await loadAnesthesia()
-    setLoading(false)
+  /* ================= REALTIME ================= */
+
+  useEffect(() => {
+    const channel = supabase
+      .channel("theatre-live")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "theatre_cases", filter: `id=eq.${caseId}` },
+        () => loadAll()
+      )
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [caseId, loadAll])
+
+  /* ================= AUTO SAVE ================= */
+
+  const autoSave = (table, payload) => {
+    clearTimeout(saveTimeout.current)
+
+    saveTimeout.current = setTimeout(async () => {
+      await supabase.from(table).upsert({
+        case_id: caseId,
+        ...payload
+      })
+    }, 500)
   }
 
-  /* ================= LOAD SURGEON NOTES ================= */
+  /* ================= WORKFLOW ================= */
 
-  const loadNotes = async () => {
-    const { data } = await supabase
-      .from("surgery_notes")
-      .select("*")
-      .eq("case_id", caseId)
-      .maybeSingle()
+  const transitionStatus = async (newStatus) => {
+    if (!currentUser) return
+    setActionLoading(true)
 
-    setNotes(data || {})
-  }
+    const { error } = await supabase.rpc("transition_theatre_case", {
+      p_case_id: caseId,
+      p_new_status: newStatus,
+      p_user: currentUser.id
+    })
 
-  const saveNotes = async () => {
-    const { data: existing } = await supabase
-      .from("surgery_notes")
-      .select("id")
-      .eq("case_id", caseId)
-      .maybeSingle()
-
-    if (existing) {
-      await supabase
-        .from("surgery_notes")
-        .update(notes)
-        .eq("case_id", caseId)
+    if (error) {
+      alert(error.message)
     } else {
-      await supabase
-        .from("surgery_notes")
-        .insert({ ...notes, case_id: caseId })
+      loadAll()
     }
 
-    alert("Surgeon notes saved")
+    setActionLoading(false)
   }
 
-  /* ================= LOAD ANESTHESIA ================= */
+  const finalizeCase = async () => {
+    setActionLoading(true)
 
-  const loadAnesthesia = async () => {
-    const { data: record } = await supabase
-      .from("anesthesia_records")
-      .select("*")
-      .eq("case_id", caseId)
-      .maybeSingle()
-
-    const { data: vitalsRows } = await supabase
-      .from("anesthesia_vitals")
-      .select("*")
-      .eq("case_id", caseId)
-      .order("recorded_at", { ascending: true })
-
-    const { data: drugRows } = await supabase
-      .from("anesthesia_drugs")
-      .select("*")
-      .eq("case_id", caseId)
-      .order("time_given", { ascending: true })
-
-    setAnesthesia(record || {})
-    setVitals(vitalsRows || [])
-    setDrugs(drugRows || [])
-  }
-
-  const saveAssessment = async () => {
-    await supabase
-      .from("anesthesia_records")
-      .upsert({ ...anesthesia, case_id: caseId })
-
-    alert("Anesthesia assessment saved")
-  }
-
-  const addVital = async () => {
-    await supabase.from("anesthesia_vitals").insert({
-      ...newVital,
-      case_id: caseId,
-      recorded_at: new Date().toISOString()
+    const { error } = await supabase.rpc("finalize_theatre_case", {
+      p_case_id: caseId,
+      p_user: currentUser.id
     })
 
-    setNewVital({})
-    loadAnesthesia()
+    if (error) {
+      alert(error.message)
+    } else {
+      loadAll()
+    }
+
+    setActionLoading(false)
   }
 
-  const addDrug = async () => {
-    await supabase.from("anesthesia_drugs").insert({
-      ...newDrug,
-      case_id: caseId,
-      time_given: new Date().toISOString()
-    })
+  /* ================= ROLE PROTECTION ================= */
 
-    setNewDrug({})
-    loadAnesthesia()
-  }
+  const isSurgeon = currentUser?.role === "SURGEON"
+  const isAnesthetist = currentUser?.role === "ANESTHETIST"
+  const isAdmin = currentUser?.role === "ADMIN"
 
-  if (loading) return <div>Loading case...</div>
+  const locked = caseData?.final_status === "CLOSED"
+
+  if (loading) return <div style={{ padding: 40 }}>Loading case...</div>
 
   return (
-    <div style={{ padding: 20, display: "grid", gap: 20 }}>
+    <div style={containerStyle}>
+      {/* HEADER */}
+      <div style={panelStyle}>
+        <h2>Theatre Case</h2>
+        <div><strong>Status:</strong> {caseData.final_status}</div>
+        <div><strong>Duration:</strong> {caseData.duration_minutes || 0} mins</div>
+        <div><strong>Version:</strong> {caseData.version}</div>
+      </div>
 
-      {/* ================= SURGEON MODULE ================= */}
+      {/* WORKFLOW ACTIONS */}
+      {!locked && (
+        <div style={panelStyle}>
+          <h3>Workflow Actions</h3>
 
-      <h2>🧑‍⚕️ Surgeon Documentation</h2>
+          <button disabled={actionLoading} onClick={() => transitionStatus("IN_SURGERY")}>
+            Start Surgery
+          </button>
 
-      <h3>Pre-Operative</h3>
+          <button disabled={actionLoading} onClick={() => transitionStatus("COMPLETED")}>
+            Complete Surgery
+          </button>
 
-      <textarea style={input} placeholder="Diagnosis"
-        value={notes.diagnosis || ""}
-        onChange={e => setNotes({ ...notes, diagnosis: e.target.value })}
-      />
+          <button disabled={actionLoading} onClick={() => transitionStatus("RECOVERY")}>
+            Move to Recovery
+          </button>
 
-      <textarea style={input} placeholder="Indication"
-        value={notes.indication || ""}
-        onChange={e => setNotes({ ...notes, indication: e.target.value })}
-      />
+          <button disabled={actionLoading} onClick={() => transitionStatus("TRANSFERRED")}>
+            Transfer to Ward
+          </button>
 
-      <label>
-        <input type="checkbox"
-          checked={notes.consent_confirmed || false}
-          onChange={e => setNotes({ ...notes, consent_confirmed: e.target.checked })}
-        /> Consent Confirmed
-      </label>
-
-      <textarea style={input} placeholder="Risks Explained"
-        value={notes.risks_explained || ""}
-        onChange={e => setNotes({ ...notes, risks_explained: e.target.value })}
-      />
-
-      <textarea style={input} placeholder="Pre-Op Plan"
-        value={notes.pre_op_plan || ""}
-        onChange={e => setNotes({ ...notes, pre_op_plan: e.target.value })}
-      />
-
-      <h3>Intra-Operative</h3>
-
-      <textarea style={input} placeholder="Procedure Performed"
-        value={notes.procedure_performed || ""}
-        onChange={e => setNotes({ ...notes, procedure_performed: e.target.value })}
-      />
-
-      <input style={input} placeholder="Incision Type"
-        value={notes.incision_type || ""}
-        onChange={e => setNotes({ ...notes, incision_type: e.target.value })}
-      />
-
-      <textarea style={input} placeholder="Findings"
-        value={notes.findings || ""}
-        onChange={e => setNotes({ ...notes, findings: e.target.value })}
-      />
-
-      <textarea style={input} placeholder="Complications"
-        value={notes.complications || ""}
-        onChange={e => setNotes({ ...notes, complications: e.target.value })}
-      />
-
-      <input type="number" style={input} placeholder="Estimated Blood Loss (ml)"
-        value={notes.estimated_blood_loss || ""}
-        onChange={e => setNotes({ ...notes, estimated_blood_loss: e.target.value })}
-      />
-
-      <textarea style={input} placeholder="Specimens Sent"
-        value={notes.specimens_sent || ""}
-        onChange={e => setNotes({ ...notes, specimens_sent: e.target.value })}
-      />
-
-      <textarea style={input} placeholder="Closure Details"
-        value={notes.closure_details || ""}
-        onChange={e => setNotes({ ...notes, closure_details: e.target.value })}
-      />
-
-      <h3>Post-Operative Orders</h3>
-
-      <textarea style={input} placeholder="Antibiotics"
-        value={notes.antibiotics || ""}
-        onChange={e => setNotes({ ...notes, antibiotics: e.target.value })}
-      />
-
-      <textarea style={input} placeholder="IV Fluids"
-        value={notes.iv_fluids || ""}
-        onChange={e => setNotes({ ...notes, iv_fluids: e.target.value })}
-      />
-
-      <textarea style={input} placeholder="Analgesics"
-        value={notes.analgesics || ""}
-        onChange={e => setNotes({ ...notes, analgesics: e.target.value })}
-      />
-
-      <textarea style={input} placeholder="Monitoring Instructions"
-        value={notes.monitoring_instructions || ""}
-        onChange={e => setNotes({ ...notes, monitoring_instructions: e.target.value })}
-      />
-
-      <button onClick={saveNotes}>Save Surgeon Notes</button>
-
-      {/* ================= ANESTHESIA MODULE ================= */}
-
-      <h2>🫁 Anesthesia Assessment</h2>
-
-      <input style={input} placeholder="ASA Classification"
-        value={anesthesia.asa_classification || ""}
-        onChange={e => setAnesthesia({ ...anesthesia, asa_classification: e.target.value })}
-      />
-
-      <input style={input} placeholder="Airway Assessment"
-        value={anesthesia.airway_assessment || ""}
-        onChange={e => setAnesthesia({ ...anesthesia, airway_assessment: e.target.value })}
-      />
-
-      <textarea style={input} placeholder="Allergies"
-        value={anesthesia.allergies || ""}
-        onChange={e => setAnesthesia({ ...anesthesia, allergies: e.target.value })}
-      />
-
-      <textarea style={input} placeholder="Risk Factors"
-        value={anesthesia.risk_factors || ""}
-        onChange={e => setAnesthesia({ ...anesthesia, risk_factors: e.target.value })}
-      />
-
-      <label>
-        <input type="checkbox"
-          checked={anesthesia.emergency_flag || false}
-          onChange={e => setAnesthesia({ ...anesthesia, emergency_flag: e.target.checked })}
-        /> Emergency Case
-      </label>
-
-      <button onClick={saveAssessment}>Save Assessment</button>
-
-      <h3>Live Vitals</h3>
-
-      <input style={input} placeholder="BP Systolic"
-        onChange={e => setNewVital({ ...newVital, bp_systolic: e.target.value })}
-      />
-      <input style={input} placeholder="BP Diastolic"
-        onChange={e => setNewVital({ ...newVital, bp_diastolic: e.target.value })}
-      />
-      <input style={input} placeholder="Pulse"
-        onChange={e => setNewVital({ ...newVital, pulse: e.target.value })}
-      />
-      <input style={input} placeholder="SpO2"
-        onChange={e => setNewVital({ ...newVital, spo2: e.target.value })}
-      />
-      <input style={input} placeholder="Temperature"
-        onChange={e => setNewVital({ ...newVital, temperature: e.target.value })}
-      />
-      <input style={input} placeholder="Respiratory Rate"
-        onChange={e => setNewVital({ ...newVital, respiratory_rate: e.target.value })}
-      />
-
-      <button onClick={addVital}>Add Vital</button>
-
-      {vitals.map(v => (
-        <div key={v.id}>
-          {new Date(v.recorded_at).toLocaleTimeString()} —
-          BP {v.bp_systolic}/{v.bp_diastolic} —
-          Pulse {v.pulse} —
-          SpO2 {v.spo2}
+          {isAdmin && (
+            <button disabled={actionLoading} onClick={finalizeCase}>
+              Finalize & Lock Case
+            </button>
+          )}
         </div>
-      ))}
+      )}
 
-      <h3>Anesthesia Drugs</h3>
+      {/* SURGEON PANEL */}
+      <div style={panelStyle}>
+        <h3>Surgeon Documentation</h3>
 
-      <input style={input} placeholder="Drug Name"
-        onChange={e => setNewDrug({ ...newDrug, drug_name: e.target.value })}
-      />
-      <input style={input} placeholder="Dose"
-        onChange={e => setNewDrug({ ...newDrug, dose: e.target.value })}
-      />
-      <input style={input} placeholder="Route"
-        onChange={e => setNewDrug({ ...newDrug, route: e.target.value })}
-      />
+        <textarea
+          style={inputStyle}
+          disabled={!isSurgeon || locked}
+          placeholder="Diagnosis"
+          value={notes.diagnosis || ""}
+          onChange={(e) => {
+            const updated = { ...notes, diagnosis: e.target.value }
+            setNotes(updated)
+            autoSave("surgery_notes", updated)
+          }}
+        />
 
-      <button onClick={addDrug}>Log Drug</button>
+        <textarea
+          style={inputStyle}
+          disabled={!isSurgeon || locked}
+          placeholder="Procedure Performed"
+          value={notes.procedure_performed || ""}
+          onChange={(e) => {
+            const updated = { ...notes, procedure_performed: e.target.value }
+            setNotes(updated)
+            autoSave("surgery_notes", updated)
+          }}
+        />
 
-      {drugs.map(d => (
-        <div key={d.id}>
-          {new Date(d.time_given).toLocaleTimeString()} —
-          {d.drug_name} — {d.dose}
-        </div>
-      ))}
+        <label>
+          <input
+            type="checkbox"
+            disabled={!isSurgeon || locked}
+            checked={notes.consent_confirmed || false}
+            onChange={(e) => {
+              const updated = { ...notes, consent_confirmed: e.target.checked }
+              setNotes(updated)
+              autoSave("surgery_notes", updated)
+            }}
+          />
+          Consent Confirmed
+        </label>
+      </div>
 
+      {/* ANESTHESIA PANEL */}
+      <div style={panelStyle}>
+        <h3>Anesthesia</h3>
+
+        <input
+          style={inputStyle}
+          disabled={!isAnesthetist || locked}
+          placeholder="ASA Classification"
+          value={anesthesia.asa_classification || ""}
+          onChange={(e) => {
+            const updated = { ...anesthesia, asa_classification: e.target.value }
+            setAnesthesia(updated)
+            autoSave("anesthesia_records", updated)
+          }}
+        />
+      </div>
+
+      {/* BILLING PANEL */}
+      <div style={panelStyle}>
+        <h3>Billing Summary</h3>
+        <div>Total: {billing.total_amount || 0}</div>
+        <div>Surgeon Commission: {billing.commission_surgeon || 0}</div>
+        <div>Anesthesia Commission: {billing.commission_anesthesia || 0}</div>
+        <div>Locked: {billing.locked ? "Yes" : "No"}</div>
+      </div>
+
+      {/* AUDIT LOG */}
+      <div style={panelStyle}>
+        <h3>Audit Trail</h3>
+        {auditLogs.map((log) => (
+          <div key={log.id}>
+            <strong>{log.action}</strong> — {log.performed_by} — {new Date(log.created_at).toLocaleString()}
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
