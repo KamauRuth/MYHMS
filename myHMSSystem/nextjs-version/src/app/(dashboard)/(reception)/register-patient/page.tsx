@@ -1,205 +1,146 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { useRouter } from "next/navigation"
-import { date, uuid } from "zod"
-import { fi } from "date-fns/locale"
-import { log } from "node:console"
 
-export default function RegisterPatient() {
-  const supabase = createClient()
-  const router = useRouter()
+const supabase = createClient()
 
+export default function RegisterPatientTableForm() {
 
-  const [firstName, setFirstName] = useState("")
-  const [lastName, setLastName] = useState("")
-  const [gender, setGender] = useState("Male")
-  const [dob, setDob] = useState("")
-  const [idNumber, setIdNumber] = useState("")
-  const [phone, setPhone] = useState("")
-  const [nextofKinName, setNextOfKinName] = useState("")
-  const [nextOfKinPhone, setNextOfKinPhone] = useState("")
-  const [address, setAddress] = useState("")
-  const [modeofPayment, setModeOfPayment] = useState("")
-  const [insuaranceProvider, setInsuranceProvider] = useState("")
-  const [services, setServices] = useState<string[]>([])    
-
-
-
-
-
-  const [loading, setLoading] = useState(false)
-  const [errorMsg, setErrorMsg] = useState("")
-
-async function handleRegister(e: React.FormEvent) {
-  e.preventDefault()
-  setLoading(true)
-  setErrorMsg("")
-
-  // 1️⃣ Insert patient AND return inserted row
-  const { data: patientData, error } = await supabase
-    .from("patients")
-    .insert([
-      {
-        first_name: firstName,
-        last_name: lastName,
-        gender,
-        dob,
-        phone,
-        id_number: idNumber,
-        address,
-        next_of_kin_name: nextofKinName,
-        next_of_kin_phone: nextOfKinPhone,
-        mode_of_payment: modeofPayment,
-        insurance_provider: insuaranceProvider,
-        services: services,
-        payment_status: "not_paid"
-      }
-    ])
-    .select()
-    .single()
-
-  if (error) {
-    setErrorMsg(error.message)
-    setLoading(false)
-    return
-  }
-
-  const patientId = patientData.id
-
-  // 2️⃣ Calculate totalAmount (example: consultation 500 for now)
-  const totalAmount = 500
-
-  // 3️⃣ Generate invoice number
-  const { data: invoiceNumber } = await supabase.rpc("generate_invoice_number")
-
-  // 4️⃣ Create invoice
-  await supabase.from("invoices").insert({
-    patient_id: patientId,
-    invoice_number: invoiceNumber,
-    total_amount: totalAmount,
-    status: "unpaid"
+  const [patients, setPatients] = useState<any[]>([])
+  const [form, setForm] = useState({
+    first_name: "",
+    last_name: "",
+    gender: "Male",
+    dob: "",
+    phone: "",
+    id_number: "",
+    address: "",
+    next_of_kin_name: "",
+    next_of_kin_phone: ""
   })
 
-  setLoading(false)
-  alert("Patient registered and invoice created!")
-  router.push("/view-patients")
-}
+  useEffect(() => {
+    loadPatients()
+  }, [])
+
+  async function loadPatients() {
+    const { data } = await supabase.from("patients").select("*")
+    setPatients(data || [])
+  }
+
+  function onChange(e:any) {
+    setForm({
+      ...form,
+      [e.target.name]: e.target.value
+    })
+  }
+
+  async function registerPatient() {
+
+    const { error } = await supabase.from("patients").insert(form)
+
+    if (error) {
+      alert(error.message)
+      return
+    }
+
+    alert("Patient registered")
+    loadPatients()
+  }
 
   return (
-    
-    <form onSubmit={handleRegister} className="space-y-4 max-w-md mx-auto">
+    <div className="p-6">
 
-      <h2 className="text-2xl font-bold">Register Patient</h2>
+      <h2 className="text-2xl font-bold mb-6">
+        Patient Registration
+      </h2>
 
-      <input
-        type="text"
-        placeholder="First Name"
-        value={firstName}
-        onChange={(e) => setFirstName(e.target.value)}
-        className="w-full border p-2 rounded"
-        required
-      />
+      {/* TABLE FORM LAYOUT */}
+      <div className="grid grid-cols-2 gap-4 border p-6 rounded">
 
-      <input
-        type="text"
-        placeholder="Last Name"
-        value={lastName}
-        onChange={(e) => setLastName(e.target.value)}
-        className="w-full border p-2 rounded"
-        required
-      />
+        <input
+          name="first_name"
+          placeholder="First Name"
+          value={form.first_name}
+          onChange={onChange}
+          className="border p-2 rounded"
+        />
 
-      <select
-        value={gender}
-        onChange={(e) => setGender(e.target.value)}
-        className="w-full border p-2 rounded"
-      >
-        <option value="Male">Male</option>
-        <option value="Female">Female</option>
-      </select>
+        <input
+          name="last_name"
+          placeholder="Last Name"
+          value={form.last_name}
+          onChange={onChange}
+          className="border p-2 rounded"
+        />
 
-      <input
-        type="date"
-        placeholder="Date of Birth"
-        value={dob}
-        onChange={(e) => setDob(e.target.value)}
-        className="w-full border p-2 rounded"
-        required
-      />    
-
-
-      <input
-        type="text"
-        placeholder="ID Number"
-        value={idNumber}
-        onChange={(e) => setIdNumber(e.target.value)}
-        className="w-full border p-2 rounded"
-      />
-
-      <input
-        type="tel"
-        placeholder="Phone"
-        value={phone}
-        onChange={(e) => setPhone(e.target.value)}
-        className="w-full border p-2 rounded"
-      />
-
-      <input
-        type="text"
-        placeholder="Address"
-        value={address}
-        onChange={(e) => setAddress(e.target.value)}
-        className="w-full border p-2 rounded"
-      />
-
-      <input
-        type="text"
-        placeholder="Next of Kin Name"
-        value={nextofKinName}
-        onChange={(e) => setNextOfKinName(e.target.value)}
-        className="w-full border p-2 rounded"
-      />
-
-      <input
-        type="tel"
-        placeholder="Next of Kin Phone"
-        value={nextOfKinPhone}
-        onChange={(e) => setNextOfKinPhone(e.target.value)}
-        className="w-full border p-2 rounded"
-      />
-
-    
-    <select 
-        value={modeofPayment}
-        onChange={(e) => setModeOfPayment(e.target.value)}
-        className="w-full border p-2 rounded"
+        <select
+          name="gender"
+          value={form.gender}
+          onChange={onChange}
+          className="border p-2 rounded"
         >
-          <option value="">Select Mode of Payment</option>
-            <option value="Cash">Cash</option>
-            <option value="Mobile Money">Mobile Money</option>
-            <option value="Insurance">Insurance</option>
-            <option value="Credit-card">Credit Card</option>
-     </select>
-    
-      <input
-        type="text"
-        placeholder="Insurance Provider"
-        value={insuaranceProvider}
-        onChange={(e) => setInsuranceProvider(e.target.value)}
-        className="w-full border p-2 rounded"
-      />    
+          <option>Male</option>
+          <option>Female</option>
+        </select>
 
-      {errorMsg && <p className="text-red-500">{errorMsg}</p>}
+        <input
+          type="date"
+          name="dob"
+          value={form.dob}
+          onChange={onChange}
+          className="border p-2 rounded"
+        />
 
-      <button
-        type="submit"
-        disabled={loading}
-        className="w-full bg-blue-600 text-white p-2 rounded"
-      >
-        {loading ? "Registering..." : "Register Patient"}
-      </button>
-    </form>
+        <input
+          name="phone"
+          placeholder="Phone"
+          value={form.phone}
+          onChange={onChange}
+          className="border p-2 rounded"
+        />
+
+        <input
+          name="id_number"
+          placeholder="ID Number"
+          value={form.id_number}
+          onChange={onChange}
+          className="border p-2 rounded"
+        />
+
+        <input
+          name="address"
+          placeholder="Address"
+          value={form.address}
+          onChange={onChange}
+          className="border p-2 rounded col-span-2"
+        />
+
+        <input
+          name="next_of_kin_name"
+          placeholder="Next of Kin Name"
+          value={form.next_of_kin_name}
+          onChange={onChange}
+          className="border p-2 rounded"
+        />
+
+        <input
+          name="next_of_kin_phone"
+          placeholder="Next of Kin Phone"
+          value={form.next_of_kin_phone}
+          onChange={onChange}
+          className="border p-2 rounded"
+        />
+
+        <button
+          onClick={registerPatient}
+          className="col-span-2 bg-blue-600 text-white p-3 rounded mt-4"
+        >
+          Register Patient
+        </button>
+
+      </div>
+    </div>
   )
 }

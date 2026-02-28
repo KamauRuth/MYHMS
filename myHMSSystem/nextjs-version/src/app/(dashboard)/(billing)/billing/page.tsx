@@ -1,124 +1,76 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect,useState } from "react"
 import { createClient } from "@/lib/supabase/client"
-import jsPDF from "jspdf"
 
 const supabase = createClient()
 
-export default function BillingPage() {
-  const [patients, setPatients] = useState<any[]>([])
-  const [selectedMethod, setSelectedMethod] = useState<string>("")
+export default function Billing(){
 
-  useEffect(() => {
-    fetchUnpaidPatients()
-  }, [])
+ const [invoices,setInvoices] = useState<any[]>([])
 
-  async function fetchUnpaidPatients() {
-    const { data } = await supabase
-      .from("patients")
-      .select("*")
-      .eq("payment_status", "not_paid")
-      .order("created_at", { ascending: true })
+ useEffect(()=>{
+   load()
+ },[])
 
-    if (data) setPatients(data)
-  }
+ async function load(){
 
-async function approvePayment(invoiceId, patientId, totalAmount, paymentMethod) {
+ const {data} = await supabase
+ .from("invoices")
+ .select("*,patients(first_name,last_name)")
+ .eq("status","unpaid")
 
-  // 1️⃣ Insert into payments table
-  await supabase.from("payments").insert({
-    invoice_id: invoiceId,
-    payment_method: paymentMethod,
-    amount_paid: totalAmount
-  })
+ setInvoices(data||[])
+ }
 
-  // 2️⃣ Update invoice
-  await supabase
-    .from("invoices")
-    .update({ status: "paid" })
-    .eq("id", invoiceId)
+ async function pay(invoice:any){
 
-  // 3️⃣ Update patient
-  await supabase
-    .from("patients")
-    .update({ payment_status: "paid" })
-    .eq("id", patientId)
+ await supabase.from("payments").insert({
+   invoice_id:invoice.id,
+   amount_paid:invoice.balance,
+   payment_method:"Cash"
+ })
 
-  alert("Payment Approved")
+ await supabase.from("invoices")
+ .update({
+   paid_amount:invoice.total_amount,
+   balance:0,
+   status:"paid"
+ })
+ .eq("id",invoice.id)
 
+ await supabase.from("patients")
+ .update({payment_status:"paid"})
+ .eq("id",invoice.patient_id)
 
-function generateReceipt(invoice) {
-  const doc = new jsPDF()
+ load()
 
-  doc.text("Lifepoint Hospital", 20, 20)
-  doc.text(`Invoice: ${invoice.invoice_number}`, 20, 30)
-  doc.text(`Amount Paid: KES ${invoice.total_amount}`, 20, 40)
-  doc.text(`Status: Paid`, 20, 50)
+ }
 
-  doc.save(`${invoice.invoice_number}.pdf`)
-}
-}
-  return (
-    <div className="p-6">
-      <h1 className="text-xl font-bold mb-6">Billing Department</h1>
+ return(
+ <div className="p-6">
 
-      <table className="w-full border text-sm">
-        <thead>
-          <tr className="bg-gray-100">
-            <th className="border p-2">#</th>
-            <th className="border p-2">Patient</th>
-            <th className="border p-2">Phone</th>
-            <th className="border p-2">Payment Method</th>
-            <th className="border p-2">Action</th>
-          </tr>
-        </thead>
+ <h1 className="text-xl font-bold">Billing</h1>
 
-        <tbody>
-          {patients.map((patient, index) => (
-            <tr key={patient.id}>
-              <td className="border p-2 text-center">{index + 1}</td>
+ {invoices.map(inv=>(
+ <div key={inv.id}
+ className="border p-3 flex justify-between">
 
-              <td className="border p-2">
-                {patient.first_name} {patient.last_name}
-              </td>
+ <div>
+ {inv.patients.first_name}
+ </div>
 
-              <td className="border p-2">{patient.phone}</td>
+ <button
+ onClick={()=>pay(inv)}
+ className="bg-green-600 text-white px-3 py-1"
+ >
+ Approve Payment
+ </button>
 
-              <td className="border p-2">
-                <select
-                  className="border p-1 rounded"
-                  value={selectedMethod}
-                  onChange={(e) => setSelectedMethod(e.target.value)}
-                >
-                  <option value="">Select</option>
-                  <option value="mobile_money">Mobile Money</option>
-                  <option value="cash">Cash</option>
-                  <option value="insurance">Insurance</option>
-                  <option value="credit_card">Credit Card</option>
-                </select>
-              </td>
+ </div>
+ ))}
 
-              <td className="border p-2 text-center">
-                <button
-                  onClick={() => approvePayment(patient.id)}
-                  className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-xs"
-                >
-                  Approve Payment
-                </button>
-              </td>
-            </tr>
-          ))}
+ </div>
+ )
 
-          {patients.length === 0 && (
-            <tr>
-              <td colSpan={5} className="text-center p-4">
-                No unpaid patients 🎉
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
-    </div>
-  )
 }

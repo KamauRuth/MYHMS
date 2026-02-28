@@ -31,6 +31,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { title } from "node:process"
 
 const data = {
   user: {
@@ -101,10 +102,46 @@ const data = {
               title: "Unpaid Patients",
               url: "/billing",
             },
+            {
+              title:"paid patients",
+              url: "/billing/paid-patients"
+            }
 
             
           ],
 
+        },
+
+        {
+          title:"Triage",
+          url:"#",
+          icon: MessageCircle,
+          items:[
+            {
+              title:"Triage Queue",
+              url:"/triage-queue"
+            },
+            {
+              title:"Triage Form",
+              url:"/triage-form"
+            }
+          ]
+        },
+
+        {
+          title:"OPD",
+          url:"#",
+          icon: Mail,
+          items:[
+            {
+              title:"OPD Queue",
+              url:"/opd-queue"
+            },
+            {
+              title:"OPD Visit",
+              url:"/opd-visit"
+            }
+          ] 
         },
 
         {
