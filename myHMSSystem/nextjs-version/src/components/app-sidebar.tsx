@@ -100,11 +100,11 @@ const data = {
           items: [
             {
               title: "Unpaid Patients",
-              url: "/billing",
+              url: "/unpaid-patients",
             },
             {
               title:"paid patients",
-              url: "/billing/paid-patients"
+              url: "/paid-patients"
             }
 
             

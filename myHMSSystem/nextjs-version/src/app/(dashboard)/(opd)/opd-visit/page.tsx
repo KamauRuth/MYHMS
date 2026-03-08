@@ -337,11 +337,12 @@ const handleDiagnosisKeyDown = (e: any) => {
 }
 
  async function sendLab() {
+
   for (const selectedTestId of labs) {
 
     if (!selectedTestId) continue;
 
-    // Fetch lab test details
+    // 1️⃣ Fetch test details
     const { data: test, error } = await supabase
       .from("lab_test_master")
       .select("id, test_name, price")
@@ -353,7 +354,7 @@ const handleDiagnosisKeyDown = (e: any) => {
       continue;
     }
 
-    // Prevent duplicate requests
+    // 2️⃣ Prevent duplicate requests
     const { data: existing } = await supabase
       .from("lab_requests")
       .select("id")
@@ -366,30 +367,79 @@ const handleDiagnosisKeyDown = (e: any) => {
       continue;
     }
 
-  // Insert lab request
-  const { data: labRequest, error: requestError } = await supabase
-    .from("lab_requests")
-    .insert({
-      visit_id: visit.id,
-      test_id: test.id,
-      lab_amount: test.price,
-      status: "PENDING",
-      payment_status: "UNPAID"
-    })
-    .select()
-    .single();
+    // 3️⃣ Get invoice for this visit
+    let { data: invoice } = await supabase
+      .from("invoices")
+      .select("*")
+      .eq("visit_id", visit.id)
+      .maybeSingle();
 
-  if (requestError) {
-    console.error(requestError);
-    continue;
+    // 4️⃣ Create invoice if none exists
+    if (!invoice) {
+
+      const { data: newInvoice, error: invoiceError } = await supabase
+        .from("invoices")
+        .insert({
+          visit_id: visit.id,
+          patient_id: visit.patient_id,
+          invoice_number: `INV-${Date.now()}`,
+          status: "unpaid",
+          total_amount: 0,
+          paid_amount: 0,
+          balance: 0
+        })
+        .select()
+        .single();
+
+      if (invoiceError) {
+        console.error(invoiceError);
+        continue;
+      }
+
+      invoice = newInvoice;
+    }
+
+    // 5️⃣ Create lab request
+    const { data: labRequest, error: requestError } = await supabase
+      .from("lab_requests")
+      .insert({
+        visit_id: visit.id,
+        test_id: test.id,
+        lab_amount: test.price,
+        status: "PENDING",
+        payment_status: "UNPAID"
+      })
+      .select()
+      .single();
+
+    if (requestError) {
+      console.error(requestError);
+      continue;
+    }
+
+    // 6️⃣ Add item to invoice
+    const { error: itemError } = await supabase
+      .from("invoice_items")
+      .insert({
+        invoice_id: invoice.id,
+        item_type: "lab",
+        item_id: test.id,
+        description: test.test_name,
+        quantity: 1,
+        unit_price: test.price,
+        total_price: test.price
+      });
+
+    if (itemError) {
+      console.error(itemError);
+      continue;
+    }
+
+    console.log(`Lab request created and billed: ${test.test_name}`);
   }
 
-  console.log(`Lab request created: ${labRequest.id}, amount: ${test.price}`);
-  }
-
-  alert("Lab requests created successfully and billing updated.");
+  alert("Lab requests created and added to billing.");
 }
-
   const sendPrescription = async () => {
     const clean = drugs.filter(d => d.name)
     if (!clean.length) return alert("Add medication")
