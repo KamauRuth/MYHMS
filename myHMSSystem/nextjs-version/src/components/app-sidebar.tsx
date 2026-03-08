@@ -143,6 +143,21 @@ const data = {
             }
           ] 
         },
+        {
+          title:"Laboratory",
+          url:"#",
+          icon: LayoutPanelLeft,
+          items:[
+            {
+              title:"Lab Queue",
+              url:"/lab-queue"
+            },
+            {
+              title:"Lab Test",
+              url:"/lab-test"
+            }
+          ] 
+        },
 
         {
           title: "Errors",

@@ -20,8 +20,6 @@ const DANGER_KEYWORDS = [
   "myocardial",
   "hemorrhage",
 ]
-const isDangerDiagnosis = (title = "") =>
-  DANGER_KEYWORDS.some(k => title.toLowerCase().includes(k))
 
 // ICD → Suggested labs mapping
 const ICD_LAB_MAP: Record<string, string[]> = {
@@ -40,6 +38,9 @@ export default function OPDVisit() {
   // LOADING STATE
   const [loading, setLoading] = useState(true)
   const [closing, setClosing] = useState(false)
+
+  // SEARCH STATE
+  const [search, setSearch] = useState("")
 
   // VISIT DATA
   const [visit, setVisit] = useState<any>(null)
@@ -62,8 +63,15 @@ export default function OPDVisit() {
 
   // LABS
   const [labs, setLabs] = useState([""])
+  const [labTests, setLabTests] = useState<any[]>([])
   const [labRequests, setLabRequests] = useState<any[]>([])
   const [hasPendingLabs, setHasPendingLabs] = useState(false)
+
+  const isDangerDiagnosis = (title = "") =>
+    DANGER_KEYWORDS.some(k => title.toLowerCase().includes(k))
+
+  const filteredLabTests = labTests?.filter((test) =>
+    test.test_name.toLowerCase().includes(search.toLowerCase()))
 
   // PHARMACY
   const [drugs, setDrugs] = useState([{ name: "", dose: "", frequency: "" }])
@@ -116,6 +124,22 @@ export default function OPDVisit() {
     }
     load()
   }, [visitId, router])
+
+  // LOAD LAB REQUESTS.
+
+  useEffect(() => {
+  const fetchLabs = async () => {
+    const { data, error } = await supabase
+      .from("lab_test_master")
+      .select("id, test_name, price" )
+
+    if (!error) {
+      setLabTests(data)
+    }
+  }
+
+  fetchLabs()
+}, [])
 
   // =========================
   // LOAD LAB REQUESTS
@@ -238,38 +262,133 @@ const handleDiagnosisKeyDown = (e: any) => {
   // =========================
   // ACTIONS
   // =========================
-  const saveConsultation = async () => {
-    if (!selectedICD) return alert("Please select a diagnosis")
+  async function saveConsultation() {
 
-    await supabase.from("consultations").insert({
-      visit_id: visitId,
-      patient_id: patient.id,
-      chief_complaint: chiefComplaint,
-      history_of_present_illness: historyOfPresentIllness,
-      examination,
-      diagnosis_text: diagnosis,
-      icd11_code: selectedICD.code,
-      icd11_title: selectedICD.title,
-      notes,
+  if (!visit?.id) {
+    alert("Visit not found")
+    return
+  }
+
+  if (!selectedICD) {
+    alert("Select diagnosis")
+    return
+  }
+
+  const icdCode = selectedICD.code
+  const diagnosisName = selectedICD.title
+
+  // 1️⃣ Check if diagnosis already exists locally
+  const { data: existing } = await supabase
+    .from("diagnoses")
+    .select("*")
+    .eq("icd11_code", icdCode)
+    .maybeSingle()
+
+  let diagnosisId = existing?.id
+
+  // 2️⃣ If not → insert new diagnosis
+  if (!diagnosisId) {
+    const { data: newDiag, error } = await supabase
+      .from("diagnoses")
+      .insert({
+        icd11_code: icdCode,
+        diagnosis_name: diagnosisName,
+        full_data: selectedICD
+      })
+      .select()
+      .single()
+
+    if (error) {
+      alert(error.message)
+      return
+    }
+
+    diagnosisId = newDiag.id
+  }
+
+  // 3️⃣ Save consultation
+  const { error: consultError } = await supabase
+    .from("consultations")
+    .insert({
+      visit_id: visit.id,
+      notes: notes ?? null
     })
 
-    alert("Consultation saved")
+  if (consultError) {
+    alert(consultError.message)
+    return
   }
 
-  const sendLab = async () => {
-    const clean = labs.filter(Boolean)
-    if (!clean.length) return alert("Add at least one lab test")
+  // 4️⃣ Link diagnosis to visit
+  const { error: visitDiagError } = await supabase
+    .from("visit_diagnoses")
+    .insert({
+      visit_id: visit.id,
+      diagnosis_id: diagnosisId,
+      diagnosis_type: "PRIMARY"
+    })
 
-    await supabase.from("lab_requests").insert(
-      clean.map(test => ({
-        visit_id: visitId,
-        test_name: test,
-        status: "PENDING",
-      }))
-    )
-
-    alert("Sent to lab")
+  if (visitDiagError) {
+    alert(visitDiagError.message)
+    return
   }
+
+  alert("Consultation & ICD-11 diagnosis saved successfully")
+}
+
+ async function sendLab() {
+  for (const selectedTestId of labs) {
+
+    if (!selectedTestId) continue;
+
+    // Fetch lab test details
+    const { data: test, error } = await supabase
+      .from("lab_test_master")
+      .select("id, test_name, price")
+      .eq("id", selectedTestId)
+      .single();
+
+    if (error || !test) {
+      console.error(error);
+      continue;
+    }
+
+    // Prevent duplicate requests
+    const { data: existing } = await supabase
+      .from("lab_requests")
+      .select("id")
+      .eq("visit_id", visit.id)
+      .eq("test_id", test.id)
+      .maybeSingle();
+
+    if (existing) {
+      console.log(`Lab test ${test.id} already requested`);
+      continue;
+    }
+
+  // Insert lab request
+  const { data: labRequest, error: requestError } = await supabase
+    .from("lab_requests")
+    .insert({
+      visit_id: visit.id,
+      test_id: test.id,
+      lab_amount: test.price,
+      status: "PENDING",
+      payment_status: "UNPAID"
+    })
+    .select()
+    .single();
+
+  if (requestError) {
+    console.error(requestError);
+    continue;
+  }
+
+  console.log(`Lab request created: ${labRequest.id}, amount: ${test.price}`);
+  }
+
+  alert("Lab requests created successfully and billing updated.");
+}
 
   const sendPrescription = async () => {
     const clean = drugs.filter(d => d.name)
@@ -352,115 +471,304 @@ const handleDiagnosisKeyDown = (e: any) => {
   if (loading) return <div>Loading…</div>
 
   return (
-    <div style={{ display: "grid", gap: 14 }}>
-      <h2>
-        {visit?.visit_no} — {patient?.first_name} {patient?.last_name}
-      </h2>
+    <div className="max-w-5xl mx-auto bg-white shadow-xl rounded-2xl p-8 space-y-8">
 
-      {triage && (
-        <div style={{ fontSize: 13 }}>
-          Temp {triage.temperature}°C • Pulse {triage.pulse} •
-          BP {triage.bp_systolic}/{triage.bp_diastolic} • SpO₂ {triage.spo2}%
-        </div>
-      )}
+  {/* HEADER */}
+  <div className="border-b pb-4">
+    <h2 className="text-2xl font-bold text-blue-700">
+      {visit?.visit_no} — {patient?.first_name} {patient?.last_name}
+    </h2>
 
-      {/* CONSULTATION */}
-      <h3>Consultation</h3>
+    {triage && (
+      <div className="mt-2 text-sm text-gray-600 bg-blue-50 p-3 rounded-lg">
+        Temp {triage.temperature}°C • Pulse {triage.pulse} •
+        BP {triage.bp_systolic}/{triage.bp_diastolic} • SpO₂ {triage.spo2}%
+      </div>
+    )}
+  </div>
+
+  {/* CONSULTATION */}
+  <div className="space-y-4">
+    <h3 className="text-xl font-semibold text-gray-800 border-b pb-2">
+      Consultation
+    </h3>
+
+    <div className="grid gap-4">
       <input
+        className="border rounded-lg p-3 focus:ring-2 focus:ring-blue-400 outline-none"
         placeholder="Chief Complaint"
         value={chiefComplaint}
         onChange={e => setChiefComplaint(e.target.value)}
       />
+
       <textarea
+        className="border rounded-lg p-3 focus:ring-2 focus:ring-blue-400 outline-none min-h-[100px]"
         placeholder="History of Present Illness"
         value={historyOfPresentIllness}
         onChange={e => setHPI(e.target.value)}
       />
+
       <textarea
+        className="border rounded-lg p-3 focus:ring-2 focus:ring-blue-400 outline-none min-h-[100px]"
         placeholder="Examination Findings"
         value={examination}
         onChange={e => setExamination(e.target.value)}
       />
+    </div>
 
-      <h4>Diagnosis (ICD-11)</h4>
+    {/* Diagnosis */}
+    <div className="space-y-3">
+      <h4 className="font-semibold text-gray-700">Diagnosis (ICD-11)</h4>
+
       <input
+        className="border rounded-lg p-3 w-full focus:ring-2 focus:ring-blue-400 outline-none disabled:bg-gray-100"
         placeholder={hasPendingLabs ? "Diagnosis locked until labs reviewed" : "Type diagnosis (e.g. malaria)"}
         value={diagnosis}
         disabled={hasPendingLabs}
         onChange={e => {
-        setDiagnosis(e.target.value)
-        setSelectedICD(null)
-        setDiagnosisLocked(false)
+          setDiagnosis(e.target.value)
+          setSelectedICD(null)
+          setDiagnosisLocked(false)
         }}
         onKeyDown={handleDiagnosisKeyDown}
       />
+
       {icdResults.map((item) => (
         <div
-            key={item.code}
-            className="p-3 border rounded-lg mb-2 hover:bg-blue-50 cursor-pointer"
-            onClick={() => selectDiagnosis(item)}
+          key={item.code}
+          className="p-3 border rounded-lg hover:bg-blue-50 cursor-pointer transition"
+          onClick={() => selectDiagnosis(item)}
         >
-            <div>
-                {item.title} <span className="text-gray-500">({item.code})</span>
-            </div>
+          {item.title}
+          <span className="text-gray-500 ml-2">({item.code})</span>
         </div>
-        ))}
+      ))}
 
-      {suggestedLabs.length > 0 && <div>Suggested Labs: {suggestedLabs.join(", ")}</div>}
+      {suggestedLabs.length > 0 && (
+        <div className="text-sm bg-yellow-50 border border-yellow-200 p-3 rounded-lg">
+          Suggested Labs: {suggestedLabs.join(", ")}
+        </div>
+      )}
+
       <textarea
+        className="border rounded-lg p-3 focus:ring-2 focus:ring-blue-400 outline-none min-h-[100px]"
         placeholder="Doctor Notes"
         value={notes}
         onChange={e => setNotes(e.target.value)}
       />
 
-      <button onClick={saveConsultation}>Save Consultation</button>
-
-      {/* LABS */}
-      <h3>Send to Lab</h3>
-      {labs.map((l, i) => (
-        <input key={i} value={l} onChange={e => { const c = [...labs]; c[i] = e.target.value; setLabs(c) }} />
-      ))}
-      <button onClick={() => setLabs([...labs, ""])}>+ Add Lab</button>
-      <button onClick={sendLab}>Send to Lab</button>
-
-      {/* PRESCRIPTION */}
-      <h3>Prescription</h3>
-      {drugs.map((d, i) => (
-        <div key={i}>
-          <input placeholder="Drug" value={d.name} onChange={e => { const c = [...drugs]; c[i].name = e.target.value; setDrugs(c) }} />
-          <input placeholder="Dose" value={d.dose} onChange={e => { const c = [...drugs]; c[i].dose = e.target.value; setDrugs(c) }} />
-          <input placeholder="Frequency" value={d.frequency} onChange={e => { const c = [...drugs]; c[i].frequency = e.target.value; setDrugs(c) }} />
-        </div>
-      ))}
-      <button onClick={() => setDrugs([...drugs, { name: "", dose: "", frequency: "" }])}>+ Add Drug</button>
-      <button onClick={sendPrescription}>Send to Pharmacy</button>
-
-      {/* SURGERY */}
-      {showBooking && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.4)" }}>
-          <div style={{ background: "#fff", padding: 20 }}>
-            <input placeholder="Procedure" value={procedure} onChange={e => setProcedure(e.target.value)} />
-            <select value={urgency} onChange={e => setUrgency(e.target.value)}>
-              <option value="ELECTIVE">Elective</option>
-              <option value="EMERGENCY">Emergency</option>
-            </select>
-            <input type="date" value={preferredDate} onChange={e => setPreferredDate(e.target.value)} />
-            <input placeholder="Estimated Duration" value={estimatedDuration} onChange={e => setEstimatedDuration(e.target.value)} />
-            <button onClick={bookForSurgery}>Confirm Booking</button>
-            <button onClick={() => setShowBooking(false)}>Cancel</button>
-          </div>
-        </div>
-      )}
-
-      {/* FINAL ACTIONS */}
-      <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-        <button onClick={() => setShowBooking(true)}>Book for Surgery</button>
-        <button onClick={admitToIPD} disabled={closing}>Admit to IPD</button>
-        <button onClick={closeConsultation} disabled={closing}>Close Consultation</button>
-      </div>
-
-      <button onClick={() => router.push("/opd-queue")}>← Back</button>
+      <button
+        className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
+        onClick={saveConsultation}
+      >
+        Save Consultation
+      </button>
     </div>
+  </div>
+
+  {/* LABS */}
+  <div className="space-y-4">
+  <h3 className="text-xl font-semibold border-b pb-2">
+    Send to Lab
+  </h3>
+
+  {/* Search Box */}
+  <input
+    type="text"
+    placeholder="Search lab test..."
+    className="border rounded-lg p-3 w-full focus:ring-2 focus:ring-blue-400 outline-none"
+    value={search}
+    onChange={(e) => setSearch(e.target.value)}
+  />
+
+  {/* Lab Select */}
+  {labs.map((l, i) => (
+    <select
+      key={i}
+      className="border rounded-lg p-3 w-full focus:ring-2 focus:ring-blue-400 outline-none"
+      value={l}
+      onChange={(e) => {
+        const updated = [...labs]
+        updated[i] = e.target.value
+        setLabs(updated)
+      }}
+    >
+      <option value="">Select Lab Test</option>
+
+      {filteredLabTests?.map((test) => (
+        <option key={test.id} value={test.id}>
+          {test.test_name} - KES {test.price}
+        </option>
+      ))}
+    </select>
+  ))}
+
+  <div className="flex gap-3">
+    <button
+      className="bg-gray-200 px-4 py-2 rounded-lg hover:bg-gray-300"
+      onClick={() => setLabs([...labs, ""])}
+    >
+      + Add Lab
+    </button>
+
+    <button
+      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+      onClick={() => {
+        const hasSelectedTests = labs.some(l => l)
+        if (hasSelectedTests) sendLab()
+      }}
+    >
+      Send to Lab
+    </button>
+  </div>
+</div>
+
+  {/* PRESCRIPTION */}
+  <div className="space-y-4">
+    <h3 className="text-xl font-semibold border-b pb-2">
+      Prescription
+    </h3>
+
+    {drugs.map((d, i) => (
+      <div key={i} className="grid md:grid-cols-3 gap-3">
+        <input
+          className="border rounded-lg p-3"
+          placeholder="Drug"
+          value={d.name}
+          onChange={e => {
+            const c = [...drugs]
+            c[i].name = e.target.value
+            setDrugs(c)
+          }}
+        />
+        <input
+          className="border rounded-lg p-3"
+          placeholder="Dose"
+          value={d.dose}
+          onChange={e => {
+            const c = [...drugs]
+            c[i].dose = e.target.value
+            setDrugs(c)
+          }}
+        />
+        <input
+          className="border rounded-lg p-3"
+          placeholder="Frequency"
+          value={d.frequency}
+          onChange={e => {
+            const c = [...drugs]
+            c[i].frequency = e.target.value
+            setDrugs(c)
+          }}
+        />
+      </div>
+    ))}
+
+    <div className="flex gap-3">
+      <button
+        className="bg-gray-200 px-4 py-2 rounded-lg hover:bg-gray-300"
+        onClick={() => setDrugs([...drugs, { name: "", dose: "", frequency: "" }])}
+      >
+        + Add Drug
+      </button>
+
+      <button
+        className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+        onClick={sendPrescription}
+      >
+        Send to Pharmacy
+      </button>
+    </div>
+  </div>
+
+  {/* SURGERY MODAL */}
+  {showBooking && (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center">
+      <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md space-y-4">
+        <h3 className="text-lg font-semibold">Surgery Booking</h3>
+
+        <input
+          className="border rounded-lg p-3 w-full"
+          placeholder="Procedure"
+          value={procedure}
+          onChange={e => setProcedure(e.target.value)}
+        />
+
+        <select
+          className="border rounded-lg p-3 w-full"
+          value={urgency}
+          onChange={e => setUrgency(e.target.value)}
+        >
+          <option value="ELECTIVE">Elective</option>
+          <option value="EMERGENCY">Emergency</option>
+        </select>
+
+        <input
+          type="date"
+          className="border rounded-lg p-3 w-full"
+          value={preferredDate}
+          onChange={e => setPreferredDate(e.target.value)}
+        />
+
+        <input
+          className="border rounded-lg p-3 w-full"
+          placeholder="Estimated Duration"
+          value={estimatedDuration}
+          onChange={e => setEstimatedDuration(e.target.value)}
+        />
+
+        <div className="flex justify-end gap-3">
+          <button
+            className="bg-gray-200 px-4 py-2 rounded-lg"
+            onClick={() => setShowBooking(false)}
+          >
+            Cancel
+          </button>
+          <button
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg"
+            onClick={bookForSurgery}
+          >
+            Confirm Booking
+          </button>
+        </div>
+      </div>
+    </div>
+  )}
+
+  {/* FINAL ACTIONS */}
+  <div className="flex flex-wrap gap-4 pt-6 border-t">
+    <button
+      className="bg-purple-600 text-white px-4 py-2 rounded-lg"
+      onClick={() => setShowBooking(true)}
+    >
+      Book for Surgery
+    </button>
+
+    <button
+      className="bg-orange-600 text-white px-4 py-2 rounded-lg disabled:opacity-50"
+      onClick={admitToIPD}
+      disabled={closing}
+    >
+      Admit to IPD
+    </button>
+
+    <button
+      className="bg-red-600 text-white px-4 py-2 rounded-lg disabled:opacity-50"
+      onClick={closeConsultation}
+      disabled={closing}
+    >
+      Close Consultation
+    </button>
+  </div>
+
+  <button
+    className="text-blue-600 hover:underline"
+    onClick={() => router.push("/opd-queue")}
+  >
+    ← Back
+  </button>
+
+</div>
   )
 
 }
