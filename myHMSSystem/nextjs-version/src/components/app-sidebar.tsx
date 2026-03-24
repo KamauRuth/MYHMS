@@ -140,6 +140,10 @@ const data = {
             {
               title:"OPD Visit",
               url:"/opd-visit"
+            },
+            {
+              title:"Admit to IPD",
+              url:"/admit"
             }
           ] 
         },
@@ -157,6 +161,38 @@ const data = {
               url:"/lab-test"
             }
           ] 
+        },
+
+        {
+          title:"Pharmacy",
+          url:"#",
+          icon: LayoutPanelLeft,
+          items:[
+            {
+              title:"Pharmacy Dashboard",
+              url:"/pharmacy-dashboard"
+            },
+            {
+              title:"Stock Management",
+              url:"/stock-management"
+            }
+          ]
+        },
+        
+        {
+          title:"Dental",
+          url:"#",
+          icon: LayoutPanelLeft,
+          items:[
+            {
+              title:"Dental Queue",
+              url:"/dental-queue"
+            },
+            {
+              title:"Dental Visit",
+              url:"/dental-visit"
+            }
+          ]
         },
 
         {

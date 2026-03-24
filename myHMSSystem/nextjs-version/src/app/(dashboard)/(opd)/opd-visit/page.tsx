@@ -75,6 +75,10 @@ export default function OPDVisit() {
 
   // PHARMACY
   const [drugs, setDrugs] = useState([{ name: "", dose: "", frequency: "" }])
+  const [departments, setDepartments] = useState<any[]>([])
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState<string>("")
+  const [allDrugs, setAllDrugs] = useState([]) 
+
 
   // THEATRE / SURGERY
   const [showBooking, setShowBooking] = useState(false)
@@ -440,18 +444,37 @@ const handleDiagnosisKeyDown = (e: any) => {
 
   alert("Lab requests created and added to billing.");
 }
-  const sendPrescription = async () => {
-    const clean = drugs.filter(d => d.name)
+ const sendPrescription = async () => {
+  try {
+    const clean = drugs.filter(d => d.drug_id && d.quantity)
     if (!clean.length) return alert("Add medication")
 
-    await supabase.from("prescriptions").insert({
-      visit_id: visitId,
-      medications: clean,
-    })
+    if (!selectedDepartmentId) {
+      return alert("Select department")
+    }
+
+    const payload = clean.map(d => ({
+      patient_visit_id: visitId,
+      drug_id: d.drug_id,
+      quantity: d.quantity,
+      status: "PENDING",
+      department_id: selectedDepartmentId,
+      prescribed_by: "doctor-user-id"
+    }))
+
+    const { error } = await supabase
+      .from("prescriptions")
+      .insert(payload)
+
+    if (error) throw error
 
     alert("Sent to pharmacy")
+    setDrugs([])
+  } catch (err) {
+    console.error(err)
+    alert("Failed to send prescription")
   }
-
+}
   const closeConsultation = async () => {
     if (!selectedICD) return alert("Diagnosis required before closing consultation")
     setClosing(true)
@@ -674,62 +697,119 @@ const handleDiagnosisKeyDown = (e: any) => {
 </div>
 
   {/* PRESCRIPTION */}
-  <div className="space-y-4">
-    <h3 className="text-xl font-semibold border-b pb-2">
-      Prescription
-    </h3>
+  <div className="space-y-6">
+  <h3 className="text-xl font-semibold border-b pb-2">
+    Prescription
+  </h3>
 
-    {drugs.map((d, i) => (
-      <div key={i} className="grid md:grid-cols-3 gap-3">
-        <input
-          className="border rounded-lg p-3"
-          placeholder="Drug"
-          value={d.name}
-          onChange={e => {
-            const c = [...drugs]
-            c[i].name = e.target.value
-            setDrugs(c)
-          }}
-        />
-        <input
-          className="border rounded-lg p-3"
-          placeholder="Dose"
-          value={d.dose}
-          onChange={e => {
-            const c = [...drugs]
-            c[i].dose = e.target.value
-            setDrugs(c)
-          }}
-        />
-        <input
-          className="border rounded-lg p-3"
-          placeholder="Frequency"
-          value={d.frequency}
-          onChange={e => {
-            const c = [...drugs]
-            c[i].frequency = e.target.value
-            setDrugs(c)
-          }}
-        />
-      </div>
-    ))}
-
-    <div className="flex gap-3">
-      <button
-        className="bg-gray-200 px-4 py-2 rounded-lg hover:bg-gray-300"
-        onClick={() => setDrugs([...drugs, { name: "", dose: "", frequency: "" }])}
-      >
-        + Add Drug
-      </button>
-
-      <button
-        className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
-        onClick={sendPrescription}
-      >
-        Send to Pharmacy
-      </button>
-    </div>
+  {/* Department Selection */}
+  <div>
+    <label className="block mb-1 font-medium">Department</label>
+    <select
+      value={selectedDepartmentId}
+      onChange={(e) => setSelectedDepartmentId(e.target.value)}
+      className="border rounded-lg p-3 w-full"
+    >
+      <option value="">Select Department</option>
+      {departments.map(dep => (
+        <option key={dep.id} value={dep.id}>
+          {dep.name}
+        </option>
+      ))}
+    </select>
   </div>
+
+  {/* Drug Rows */}
+  {drugs.map((d, i) => (
+    <div key={i} className="grid md:grid-cols-5 gap-3">
+      
+      {/* Drug Select */}
+      <select
+        className="border rounded-lg p-3"
+        value={d.drug_id || ""}
+        onChange={e => {
+          const selected = allDrugs.find(dr => dr.id === e.target.value)
+          const c = [...drugs]
+          c[i].drug_id = selected.id
+          c[i].name = selected.generic_name
+          c[i].price = selected.selling_price
+          setDrugs(c)
+        }}
+      >
+        <option value="">Select Drug</option>
+        {allDrugs.map(dr => (
+          <option key={dr.id} value={dr.id}>
+            {dr.generic_name} ({dr.brand_name})
+          </option>
+        ))}
+      </select>
+
+      {/* Quantity */}
+      <input
+        type="number"
+        className="border rounded-lg p-3"
+        placeholder="Qty"
+        value={d.quantity || ""}
+        onChange={e => {
+          const c = [...drugs]
+          c[i].quantity = parseInt(e.target.value)
+          setDrugs(c)
+        }}
+      />
+
+      {/* Dose */}
+      <input
+        className="border rounded-lg p-3"
+        placeholder="Dose"
+        value={d.dose || ""}
+        onChange={e => {
+          const c = [...drugs]
+          c[i].dose = e.target.value
+          setDrugs(c)
+        }}
+      />
+
+      {/* Frequency */}
+      <input
+        className="border rounded-lg p-3"
+        placeholder="Frequency"
+        value={d.frequency || ""}
+        onChange={e => {
+          const c = [...drugs]
+          c[i].frequency = e.target.value
+          setDrugs(c)
+        }}
+      />
+
+      {/* Price Display */}
+      <div className="flex items-center justify-center bg-gray-100 rounded-lg p-2">
+        {d.price ? `KES ${d.price}` : "-"}
+      </div>
+    </div>
+  ))}
+
+  {/* Actions */}
+  <div className="flex gap-3">
+    <button
+      className="bg-gray-200 px-4 py-2 rounded-lg hover:bg-gray-300"
+      onClick={() =>
+        setDrugs([
+          ...drugs,
+          { drug_id: "", name: "", quantity: 1, dose: "", frequency: "", price: 0 }
+        ])
+      }
+    >
+      + Add Drug
+    </button>
+
+    <button
+      className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+      onClick={sendPrescription}
+    >
+      Send to Pharmacy
+    </button>
+  </div>
+</div>
 
   {/* SURGERY MODAL */}
   {showBooking && (
@@ -795,10 +875,11 @@ const handleDiagnosisKeyDown = (e: any) => {
     </button>
 
     <button
-      className="bg-orange-600 text-white px-4 py-2 rounded-lg disabled:opacity-50"
-      onClick={admitToIPD}
-      disabled={closing}
-    >
+      onClick={() =>
+        router.push(`/admit?visit_id=${visit.id}&patient_id=${patient.patient_id}`)
+      }
+      className="bg-purple-600 text-white px-4 py-2 rounded"
+      >
       Admit to IPD
     </button>
 

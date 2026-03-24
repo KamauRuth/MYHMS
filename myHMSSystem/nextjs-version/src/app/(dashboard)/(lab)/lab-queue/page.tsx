@@ -3,10 +3,12 @@
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import { useRouter } from "next/navigation"
+import { log } from "console"
 
 const supabase = createClient()
 
 export default function LabQueue() {
+
   const [requests, setRequests] = useState<any[]>([])
   const router = useRouter()
 
@@ -15,6 +17,7 @@ export default function LabQueue() {
   }, [])
 
   const load = async () => {
+
     const { data: labQueue, error } = await supabase
       .from("lab_requests")
       .select(`
@@ -25,6 +28,12 @@ export default function LabQueue() {
         payment_status,
         lab_test_master (
           test_name
+        ),
+        visits (
+          patients (
+            first_name,
+            last_name
+          )
         )
       `)
       .order("created_at", { ascending: true })
@@ -34,25 +43,44 @@ export default function LabQueue() {
       return
     }
 
-    if (labQueue) {
-      setRequests(labQueue)
-    }
+    setRequests(labQueue || [])
   }
 
   const openLab = (labId: string) => {
-    router.push(`/labs/${labId}`) // example: navigate to lab details page
+    router.push(`/labs/${labId}`)
   }
+   console.log(requests)
 
   return (
+
     <div className="p-8 space-y-6">
+
       <h1 className="text-2xl font-bold">Laboratory Queue</h1>
 
       {requests.map((req) => (
-        <div key={req.id} className="border rounded-xl p-4 flex justify-between items-center">
-          
+
+        <div
+          key={req.id}
+          className="border rounded-xl p-4 flex justify-between items-center"
+        >
+
           <div>
-            <div className="font-semibold">{req.lab_test_master?.test_name}</div>
-            <div className="text-sm text-gray-600">Status: {req.status}</div>
+
+            <div className="font-semibold">
+              {req.lab_test_master?.test_name}
+            </div>
+
+            <div className="text-sm text-gray-700">
+              Patient:{" "}
+              {req.visits?.patients
+                ? `${req.visits.patients.first_name} ${req.visits.patients.last_name}`
+                : "Unknown"}
+            </div>
+
+            <div className="text-sm text-gray-600">
+              Status: {req.status}
+            </div>
+
             <div className="text-sm">
               Payment:{" "}
               <span
@@ -65,24 +93,29 @@ export default function LabQueue() {
                 {req.payment_status}
               </span>
             </div>
-            <div className="text-sm text-gray-600">Amount: KES {req.lab_amount}</div>
+
+            <div className="text-sm text-gray-600">
+              Amount: KES {req.lab_amount}
+            </div>
+
           </div>
 
-          <div>
-            <button
-              disabled={req.payment_status === "UNPAID"}
-              onClick={() => openLab(req.id)}
-              className={`px-4 py-2 rounded-lg text-white ${
-                req.payment_status === "UNPAID"
-                  ? "bg-gray-400 cursor-not-allowed"
-                  : "bg-blue-600 hover:bg-blue-700"
-              }`}
-            >
-              Open Lab
-            </button>
-          </div>
+          <button
+            disabled={req.payment_status === "UNPAID"}
+            onClick={() => openLab(req.id)}
+            className={`px-4 py-2 rounded-lg text-white ${
+              req.payment_status === "UNPAID"
+                ? "bg-gray-400 cursor-not-allowed"
+                : "bg-blue-600 hover:bg-blue-700"
+            }`}
+          >
+            Open Lab
+          </button>
+
         </div>
+
       ))}
+
     </div>
   )
 }

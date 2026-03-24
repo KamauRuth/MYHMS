@@ -66,6 +66,8 @@ export default function Billing() {
     setTotalToday(todayTotal)
   }
 
+  console.log("Invoices:", invoices)
+
   async function pay(invoice: any, amount: number) {
 
     console.log("Starting payment...")
@@ -92,7 +94,7 @@ export default function Billing() {
     }
 
     // Update invoice
-    const { error: invoiceError } = await supabase
+    const { error: invoiceError, data: updatedInvoice } = await supabase
       .from("invoices")
       .update({
         status: "paid",
@@ -102,10 +104,12 @@ export default function Billing() {
       .eq("id", invoice.id)
 
     if (invoiceError) {
-      console.error(invoiceError)
+      console.error(invoiceError,)
       alert("Invoice update failed")
       return
     }
+
+    console.log("Payment successful, invoice updated:", updatedInvoice)
 
     console.log("Payment successful")
 
