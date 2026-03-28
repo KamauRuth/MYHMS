@@ -59,19 +59,6 @@ export default function LabTestMaster() {
     }
   }
 
-  const deleteTest = async (id: string) => {
-    const { error } = await supabase
-      .from("lab_test_master")
-      .delete()
-      .eq("id", id)
-
-    if (error) {
-      console.error("Failed to delete test", error)
-    } else {
-      loadTests()
-    }
-  }
-
   if (loading) return <p className="p-6">Loading tests...</p>
 
   return (
@@ -86,14 +73,8 @@ export default function LabTestMaster() {
               <h3 className="font-semibold text-lg mb-2">{category}</h3>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
                 {tests.filter(t => t.category === category).map(test => (
-                  <div key={test.id} className="flex justify-between items-center bg-gray-50 p-2 rounded">
-                    <span>{test.test_name}</span>
-                    <button
-                      onClick={() => deleteTest(test.id)}
-                      className="text-red-600 hover:text-red-800"
-                    >
-                      ✕
-                    </button>
+                  <div key={test.id} className="bg-gray-50 p-2 rounded">
+                    {test.test_name}
                   </div>
                 ))}
               </div>

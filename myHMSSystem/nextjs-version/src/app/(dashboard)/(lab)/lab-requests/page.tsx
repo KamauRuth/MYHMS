@@ -115,13 +115,13 @@ export default function LabRequests() {
                   </td>
                   <td className="border p-2">
                     <button
-                      onClick={() => window.location.href = `/lab/samples?requestId=${request.id}`}
+                      onClick={() => window.location.href = `/samples?requestId=${request.id}`}
                       className="bg-blue-600 text-white px-2 py-1 rounded text-sm mr-2"
                     >
                       Manage Sample
                     </button>
                     <button
-                      onClick={() => window.location.href = `/lab/results?requestId=${request.id}`}
+                      onClick={() => window.location.href = `/results?requestId=${request.id}`}
                       className="bg-green-600 text-white px-2 py-1 rounded text-sm"
                     >
                       Enter Results

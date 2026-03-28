@@ -216,31 +216,31 @@ const data = {
             },
             {
               title:"Sample Management",
-              url:"/lab/samples"
+              url:"/samples"
             },
             {
               title:"Result Entry",
-              url:"/lab/results"
+              url:"/results"
             },
             {
               title:"Result Validation",
-              url:"/lab/validation"
+              url:"/validation"
             },
             {
               title:"Result Delivery",
-              url:"/lab/delivery"
+              url:"/delivery"
             },
             {
               title:"Critical Alerts",
-              url:"/lab/alerts"
+              url:"/alerts"
             },
             {
               title:"Quality Control",
-              url:"/lab/qc"
+              url:"/qc"
             },
             {
               title:"Billing Integration",
-              url:"/lab/billing"
+              url:"/billing"
             }
           ]
         },

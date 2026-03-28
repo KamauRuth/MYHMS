@@ -542,6 +542,24 @@ CREATE TABLE IF NOT EXISTS public.lab_test_master (
   CONSTRAINT lab_test_master_test_code_key UNIQUE (test_code)
 );
 
+-- Lab Samples Table (Sample Collection & Tracking)
+CREATE TABLE IF NOT EXISTS public.lab_samples (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  request_id uuid NOT NULL,
+  sample_type text NOT NULL,
+  sample_code text UNIQUE,
+  collection_time timestamp with time zone DEFAULT now(),
+  collected_by uuid NULL REFERENCES public.staff(id),
+  lab_received_time timestamp with time zone NULL,
+  sample_status text NOT NULL DEFAULT 'collected' CHECK (sample_status IN ('collected', 'received', 'processing', 'damaged', 'rejected')),
+  notes text NULL,
+  created_at timestamp with time zone DEFAULT now(),
+  updated_at timestamp with time zone DEFAULT now(),
+  CONSTRAINT lab_samples_pkey PRIMARY KEY (id),
+  CONSTRAINT lab_samples_request_id_fkey FOREIGN KEY (request_id)
+    REFERENCES public.lab_requests(id) ON DELETE CASCADE
+);
+
 -- Lab Results Table
 CREATE TABLE IF NOT EXISTS public.lab_results (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -723,3 +741,16 @@ INSERT INTO public.theatre_bills (case_id, patient_id, total_amount, surgeon_fee
 -- Sample theatre commission
 INSERT INTO public.theatre_commissions (doctor_id, doctor_name, case_id, procedure_name, commission_amount, commission_percentage, total_fee, payment_status, commission_date) VALUES
 ('00000000-0000-0000-0000-000000000001', 'Dr. John Smith', '00000000-0000-0000-0000-000000000001', 'Appendectomy', 30000.00, 30.00, 100000.00, 'pending', CURRENT_DATE);
+
+-- Sample lab test master data
+INSERT INTO public.lab_test_master (test_name, test_code, category, sample_type, turnaround_time_minutes, price, cost, active) VALUES
+('Full Blood Count', 'FBC001', 'Hematology', 'blood', 60, 500.00, 200.00, true),
+('Malaria Smear', 'MAL001', 'Parasitology', 'blood', 30, 300.00, 100.00, true),
+('Urine Analysis', 'UA001', 'Clinical Chemistry', 'urine', 45, 400.00, 150.00, true),
+('Stool Culture', 'SC001', 'Microbiology', 'stool', 120, 800.00, 300.00, true),
+('Chest X-Ray', 'CXR001', 'Radiology', 'other', 15, 1500.00, 500.00, true),
+('Blood Glucose', 'BG001', 'Clinical Chemistry', 'blood', 15, 200.00, 50.00, true),
+('HIV Test', 'HIV001', 'Immunology', 'blood', 60, 600.00, 200.00, true),
+('Pregnancy Test', 'PT001', 'Endocrinology', 'urine', 15, 250.00, 80.00, true),
+('Liver Function Test', 'LFT001', 'Clinical Chemistry', 'blood', 60, 1200.00, 400.00, true),
+('Kidney Function Test', 'KFT001', 'Clinical Chemistry', 'Blood', 60, 1000.00, 350.00, true);
