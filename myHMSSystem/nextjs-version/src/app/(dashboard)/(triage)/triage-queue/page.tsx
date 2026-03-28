@@ -2,83 +2,52 @@
 
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { useRouter } from "next/navigation"
+import Link from "next/link"
 
 const supabase = createClient()
 
 export default function TriageQueue() {
-  const [queue, setQueue] = useState<any[]>([])
-  const router = useRouter()
+  const [visits, setVisits] = useState<any[]>([])
 
   useEffect(() => {
-    loadQueue()
+    fetchQueue()
   }, [])
 
-  const loadQueue = async () => {
-    const { data, error } = await supabase
+  const fetchQueue = async () => {
+    const { data } = await supabase
       .from("visits")
       .select(`
         id,
+        clinic,
         created_at,
-        patients (
-          first_name,
-          last_name
-        )
+        patients(first_name, last_name)
       `)
       .eq("status", "TRIAGE")
-      .eq("triage_status", "pending")
-      .order("created_at", { ascending: true })
 
-    if (!error && data) {
-      setQueue(data)
-    }
-  }
-
-  // 🔹 Open Triage Form
-  const handleOpen = async (visitId: string) => {
-    // Lock visit so others can't open
-    await supabase
-      .from("visits")
-      .update({ triage_status: "in_progress" })
-      .eq("id", visitId)
-      .eq("triage_status", "pending")
-
-    // Redirect with query param
-    router.push(`/triage-form?visitId=${visitId}`)
+    setVisits(data || [])
   }
 
   return (
     <div className="p-6">
-      <h1 className="text-2xl font-bold mb-4">Triage Queue</h1>
+      <h1 className="text-xl font-bold mb-4">Triage Queue</h1>
 
-      {queue.length === 0 ? (
-        <p>No patients in triage queue</p>
-      ) : (
-        <ul>
-          {queue.map((visit) => (
-            <li
-              key={visit.id}
-              className="border p-3 mb-3 rounded flex justify-between items-center"
-            >
-              <div>
-                <p className="font-semibold">
-                  {visit.patients.first_name} {visit.patients.last_name}
-                </p>
-                <p className="text-sm text-gray-500">
-                  {new Date(visit.created_at).toLocaleString()}
-                </p>
-              </div>
+      {visits.map(v => (
+        <div key={v.id} className="border p-4 rounded mb-3 flex justify-between">
 
-              <button
-                onClick={() => handleOpen(visit.id)}
-                className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
-              >
-                Open
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+          <div>
+            <p>{v.patients.first_name} {v.patients.last_name}</p>
+            <p className="text-sm text-gray-500">{v.clinic}</p>
+          </div>
+
+          <Link
+            href={`/triage-form?visitId=${v.id}&clinic=${v.clinic}`}
+            className="bg-blue-600 text-white px-4 py-2 rounded"
+          >
+            Triage
+          </Link>
+
+        </div>
+      ))}
     </div>
   )
 }

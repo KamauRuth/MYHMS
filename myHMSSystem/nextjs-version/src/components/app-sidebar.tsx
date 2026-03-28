@@ -148,19 +148,100 @@ const data = {
           ] 
         },
         {
+          title:"Maternity",
+          url:"#",
+          icon: Calendar,
+          items:[
+            {
+              title:"Queue",
+              url:"/maternity-queue"
+            },
+            {
+              title:"New Case",
+              url:"/maternity-new"
+            },
+            {
+              title:"Record Delivery",
+              url:"/delivery-record"
+            }
+          ]
+        },
+        {
+          title:"Antenatal Clinic (ANC)",
+          url:"#",
+          icon: Calendar,
+          items:[
+            {
+              title:"ANC Queue",
+              url:"/anc-queue"
+            },
+            {
+              title:"New ANC Visit",
+              url:"/anc-new"
+            }
+          ]
+        },
+        {
+          title:"Postnatal Clinic",
+          url:"#",
+          icon: Calendar,
+          items:[
+            {
+              title:"Postnatal Queue",
+              url:"/postnatal-queue"
+            },
+            {
+              title:"New Postnatal Visit",
+              url:"/postnatal-new"
+            }
+          ]
+        },
+        {
           title:"Laboratory",
           url:"#",
           icon: LayoutPanelLeft,
           items:[
             {
-              title:"Lab Queue",
-              url:"/lab-queue"
+              title:"Dashboard",
+              url:"/lab"
             },
             {
-              title:"Lab Test",
-              url:"/lab-test"
+              title:"Test Master",
+              url:"/lab/lab-master"
+            },
+            {
+              title:"Test Requests",
+              url:"/lab/lab-requests"
+            },
+            {
+              title:"Sample Management",
+              url:"/lab/samples"
+            },
+            {
+              title:"Result Entry",
+              url:"/lab/results"
+            },
+            {
+              title:"Result Validation",
+              url:"/lab/validation"
+            },
+            {
+              title:"Result Delivery",
+              url:"/lab/delivery"
+            },
+            {
+              title:"Critical Alerts",
+              url:"/lab/alerts"
+            },
+            {
+              title:"Quality Control",
+              url:"/lab/qc"
+            },
+            {
+              title:"Billing Integration",
+              url:"/lab/billing"
             }
-          ] 
+          ]
         },
 
         {
@@ -169,12 +250,12 @@ const data = {
           icon: LayoutPanelLeft,
           items:[
             {
-              title:"Pharmacy Dashboard",
-              url:"/pharmacy-dashboard"
+              title:"Dashboard",
+              url:"/pharmacy"
             },
             {
               title:"Stock Management",
-              url:"/stock-management"
+              url:"/pharmacy"
             }
           ]
         },

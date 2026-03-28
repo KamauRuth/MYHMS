@@ -6,7 +6,6 @@ import { createClient } from "@/lib/supabase/client"
 
 const supabase = createClient()
 
-/* Visit Number Generator */
 const generateVisitNo = () => {
   return `OPD-${new Date().getFullYear()}-${Math.floor(
     100000 + Math.random() * 900000
@@ -21,7 +20,6 @@ export default function ViewPatients() {
   const [isDialogOpen, setIsDialogOpen] = useState(false)
 
   const [services, setServices] = useState<any[]>([])
-
   const [selectedPatient, setSelectedPatient] = useState<any>(null)
 
   const [form, setForm] = useState({
@@ -35,39 +33,38 @@ export default function ViewPatients() {
   }, [])
 
   async function fetchPatients() {
-    const { data } = await supabase
-      .from("patients")
-      .select("*")
-
+    const { data } = await supabase.from("patients").select("*")
     setPatients(data || [])
   }
 
   async function fetchServices() {
-    const { data } = await supabase
-      .from("services")
-      .select("*")
-
+    const { data } = await supabase.from("services").select("*")
     setServices(data || [])
   }
 
-  /* Open dialog when patient clicked */
   const openVisitDialog = (patient: any) => {
     setSelectedPatient(patient)
     setIsDialogOpen(true)
   }
 
   async function createVisit(patientId: string) {
-
     try {
-
       setLoadingId(patientId)
 
-      const serviceName =
-        services.find(s => s.id === form.service)?.name || "General"
+      const selectedService = services.find(s => s.id === form.service)
+      const serviceName = selectedService?.name || "General"
+
+      // 🔥 DETECT DENTAL SERVICE
+      const isDental = serviceName.toLowerCase().includes("tooth") ||
+        serviceName.toLowerCase().includes("dental") ||
+        serviceName.toLowerCase().includes("teeth")
+
+      const clinic = isDental ? "DENTAL" : "GENERAL"
 
       const { error } = await supabase.from("visits").insert({
         patient_id: patientId,
         visit_type: serviceName,
+        clinic: clinic, // ✅ IMPORTANT
         payment_method: form.payment_method,
         payment_status: "paid",
         visit_no: generateVisitNo(),
@@ -77,15 +74,13 @@ export default function ViewPatients() {
 
       if (error) throw error
 
-      alert("Visit created. Patient sent to triage.")
+      alert(`Visit created → Sent to TRIAGE (${clinic})`)
 
       setIsDialogOpen(false)
 
     } catch (err: any) {
-
       console.error(err)
       alert("Failed to create visit")
-
     } finally {
       setLoadingId(null)
     }
@@ -94,9 +89,7 @@ export default function ViewPatients() {
   return (
     <div className="p-6">
 
-      <h1 className="text-2xl font-bold mb-4">
-        Patients
-      </h1>
+      <h1 className="text-2xl font-bold mb-4">Patients</h1>
 
       {patients.map((patient) => (
         <div
@@ -116,7 +109,6 @@ export default function ViewPatients() {
         </div>
       ))}
 
-      {/* Dialog */}
       {isDialogOpen && selectedPatient && (
         <Dialog>
           <div className="p-6 relative">
@@ -163,9 +155,7 @@ export default function ViewPatients() {
             </select>
 
             <button
-              onClick={() =>
-                createVisit(selectedPatient.id)
-              }
+              onClick={() => createVisit(selectedPatient.id)}
               disabled={loadingId === selectedPatient.id}
               className="bg-green-600 text-white px-4 py-2 rounded w-full"
             >
@@ -177,7 +167,6 @@ export default function ViewPatients() {
           </div>
         </Dialog>
       )}
-
     </div>
   )
 }

@@ -127,42 +127,65 @@ export default function TriageForm() {
   ========================== */
 
   const submit = async (e: any) => {
-    e.preventDefault()
-    if (!visitId) return
+  e.preventDefault()
+  if (!visitId) return
 
-    setLoading(true)
+  setLoading(true)
 
-    const { error: triageError } = await supabase
-      .from("triage")
-      .insert({
-        visit_id: visitId,
-        temperature: Number(form.temperature) || null,
-        blood_pressure:
-          form.systolicBP && form.diastolicBP
-            ? `${form.systolicBP}/${form.diastolicBP}`
-            : null,
-        pulse: Number(form.pulse) || null,
-        weight: Number(form.weight) || null,
-        notes: form.notes || null
-      })
+  const { error: triageError } = await supabase
+    .from("triage")
+    .insert({
+      visit_id: visitId,
+      temperature: Number(form.temperature) || null,
+      blood_pressure:
+        form.systolicBP && form.diastolicBP
+          ? `${form.systolicBP}/${form.diastolicBP}`
+          : null,
+      pulse: Number(form.pulse) || null,
+      weight: Number(form.weight) || null,
+      notes: form.notes || null
+    })
 
-    if (triageError) {
-      alert(triageError.message)
-      setLoading(false)
-      return
-    }
-
-    await supabase
-      .from("visits")
-      .update({
-        status: "WAITING_DOCTOR",
-        triage_status: "completed"
-      })
-      .eq("id", visitId)
-
-    alert("Triage saved & sent to doctor")
-    router.push("/opd-queue")
+  if (triageError) {
+    alert(triageError.message)
+    setLoading(false)
+    return
   }
+
+  // 🔥 GET CLINIC TYPE
+  const { data: visitData } = await supabase
+    .from("visits")
+    .select("clinic")
+    .eq("id", visitId)
+    .single()
+
+  const clinic = visitData?.clinic || "GENERAL"
+
+  // 🔥 UPDATE STATUS
+  await supabase
+    .from("visits")
+    .update({
+      status: clinic === "DENTAL" ? "WAITING_DENTIST" : "WAITING_DOCTOR",
+      triage_status: "completed"
+    })
+    .eq("id", visitId)
+
+  // 🔥 IF DENTAL → CREATE DENTAL VISIT HERE (CORRECT PLACE)
+  if (clinic === "DENTAL") {
+    await supabase.from("dental_visits").insert({
+      visit_id: visitId,
+      status: "waiting"
+    })
+  }
+
+  alert(`Triage complete → Sent to ${clinic}`)
+
+  router.push(
+    clinic === "DENTAL"
+      ? "/dental-queue"
+      : "/opd-queue"
+  )
+}
 
   if (!visit) return <p className="p-6">Loading...</p>
 
