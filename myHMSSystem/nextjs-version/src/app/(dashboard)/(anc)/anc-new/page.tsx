@@ -107,7 +107,7 @@ export default function ANCNew() {
     }
 
     alert("ANC visit recorded")
-    router.push("/anc-queue")
+    router.push("/(anc)/anc-queue")
   }
 
   return (

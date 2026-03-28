@@ -109,7 +109,7 @@ export default function OPDVisit() {
 
       if (visitError || !visitData) {
         alert("Visit not found")
-        router.push("/opd-queue")
+        router.push("/(opd)/opd-queue")
         return
       }
 
@@ -172,7 +172,7 @@ useEffect(() => {
 
       if (visitError || !visitData) {
         alert("Visit not found")
-        router.push("/opd-queue")
+        router.push("/(opd)/opd-queue")
         return
       }
 
@@ -894,7 +894,7 @@ const handleDiagnosisKeyDown = (e: any) => {
 
   <button
     className="text-blue-600 hover:underline"
-    onClick={() => router.push("/opd-queue")}
+    onClick={() => router.push("/(opd)/opd-queue")}
   >
     ← Back
   </button>

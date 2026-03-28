@@ -115,7 +115,7 @@ export default function PostnatalNew() {
     }
 
     alert("Postnatal visit recorded")
-    router.push("/postnatal-queue")
+    router.push("/(postnatal)/postnatal-queue")
   }
 
   return (

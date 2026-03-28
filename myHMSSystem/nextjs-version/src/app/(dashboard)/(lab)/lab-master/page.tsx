@@ -8,18 +8,27 @@ const supabase = createClient()
 export default function LabTestMaster() {
   const [tests, setTests] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [categories] = useState([
-    "Hematology",
-    "Clinical Chemistry",
-    "Microbiology",
-    "Serology / Immunology",
-    "Parasitology",
-    "Special Tests"
-  ])
+  const [categories, setCategories] = useState<string[]>([])
 
   useEffect(() => {
     loadTests()
+    loadCategories()
   }, [])
+
+  const loadCategories = async () => {
+    const { data, error } = await supabase
+      .from("lab_test_master")
+      .select("category")
+      .not("category", "is", null)
+
+    if (error) {
+      console.error("Failed to load categories", error)
+    } else {
+      // Get unique categories
+      const uniqueCategories = [...new Set(data.map(item => item.category))]
+      setCategories(uniqueCategories.sort())
+    }
+  }
 
   const loadTests = async () => {
     setLoading(true)
@@ -100,23 +109,25 @@ export default function LabTestMaster() {
               const formData = new FormData(e.target as HTMLFormElement)
               addTest({
                 test_name: formData.get("test_name"),
+                test_code: formData.get("test_code"),
                 category: formData.get("category"),
                 sample_type: formData.get("sample_type"),
-                turnaround_time: formData.get("turnaround_time"),
-                cost: formData.get("cost")
+                turnaround_time_minutes: formData.get("turnaround_time"),
+                price: formData.get("price")
               })
               ;(e.target as HTMLFormElement).reset()
             }}
             className="grid grid-cols-2 gap-4"
           >
             <input name="test_name" placeholder="Test Name" required className="border rounded px-3 py-2" />
+            <input name="test_code" placeholder="Test Code" required className="border rounded px-3 py-2" />
             <select name="category" required className="border rounded px-3 py-2">
               <option value="">Select Category</option>
               {categories.map(cat => <option key={cat} value={cat}>{cat}</option>)}
             </select>
             <input name="sample_type" placeholder="Sample Type (Blood, Urine, etc.)" className="border rounded px-3 py-2" />
-            <input name="turnaround_time" placeholder="Turnaround Time (hours)" type="number" className="border rounded px-3 py-2" />
-            <input name="cost" placeholder="Cost" type="number" step="0.01" className="border rounded px-3 py-2" />
+            <input name="turnaround_time" placeholder="Turnaround Time (Minutes)" type="number" className="border rounded px-3 py-2" />
+            <input name="price" placeholder="Price" type="number" step="0.01" className="border rounded px-3 py-2" />
             <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">
               Add Test
             </button>

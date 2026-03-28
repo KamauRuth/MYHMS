@@ -109,13 +109,13 @@ export default function LabDashboard() {
             <h3 className="font-semibold mb-2">Quick Actions</h3>
             <div className="space-y-2">
               <button
-                onClick={() => window.location.href = "/lab/lab-requests"}
+                onClick={() => window.location.href = "/lab-requests"}
                 className="w-full bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700"
               >
                 View All Requests
               </button>
               <button
-                onClick={() => window.location.href = "/lab/lab-master"}
+                onClick={() => window.location.href = "/lab-master"}
                 className="w-full bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
               >
                 Manage Test Catalog

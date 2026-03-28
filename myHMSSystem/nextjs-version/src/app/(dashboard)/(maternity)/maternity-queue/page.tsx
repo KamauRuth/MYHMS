@@ -45,7 +45,7 @@ export default function MaternityQueue() {
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-bold">Maternity Queue</h1>
         <button
-          onClick={() => router.push("/maternity-new")}
+          onClick={() => router.push("/(maternity)/maternity-new")}
           className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
         >
           New Maternity Case

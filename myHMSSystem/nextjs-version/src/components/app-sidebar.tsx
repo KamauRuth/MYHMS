@@ -15,6 +15,7 @@ import {
   CreditCard,
   LayoutTemplate,
   Users,
+  Stethoscope,
 } from "lucide-react"
 import Link from "next/link"
 import { Logo } from "@/components/logo"
@@ -207,11 +208,11 @@ const data = {
             },
             {
               title:"Test Master",
-              url:"/lab/lab-master"
+              url:"/lab-master"
             },
             {
               title:"Test Requests",
-              url:"/lab/lab-requests"
+              url:"/lab-requests"
             },
             {
               title:"Sample Management",
@@ -256,6 +257,54 @@ const data = {
             {
               title:"Stock Management",
               url:"/pharmacy"
+            }
+          ]
+        },
+
+        {
+          title:"Theatre",
+          url:"#",
+          icon: Stethoscope,
+          items:[
+            {
+              title:"Dashboard",
+              url:"/theatre"
+            },
+            {
+              title:"Surgery Booking",
+              url:"/theatre/surgery-booking"
+            },
+            {
+              title:"Surgeon Module",
+              url:"/theatre/surgeon"
+            },
+            {
+              title:"Anesthetist Module",
+              url:"/theatre/anesthetist"
+            },
+            {
+              title:"Consumables Management",
+              url:"/theatre/consumables"
+            },
+            {
+              title:"Safety Checklist",
+              url:"/theatre/safety-checklist"
+            },
+            {
+              title:"Recovery Room",
+              url:"/theatre/recovery"
+            },
+            {
+              title:"Theatre Billing",
+              url:"/theatre/billing"
+            },
+            {
+              title:"Doctor Commissions",
+              url:"/theatre/commissions"
+            },
+            {
+              title:"Reports & Analytics",
+              url:"/theatre/reports"
             }
           ]
         },
