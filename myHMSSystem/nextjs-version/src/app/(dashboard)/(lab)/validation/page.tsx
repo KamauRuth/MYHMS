@@ -24,9 +24,7 @@ export default function LabValidation() {
           visits!inner (
             patient:patients(*)
           ),
-          lab_test_master(*),
-          department,
-          urgency
+          lab_test_master(*)
         )
       `)
       .eq("status", "pending_verification")
@@ -41,6 +39,13 @@ export default function LabValidation() {
   }
 
   const approveResult = async (resultId: string) => {
+    // Find the request_id for this result
+    const result = pendingResults.find(r => r.id === resultId)
+    if (!result) {
+      alert("Result not found")
+      return
+    }
+
     // Update result status
     const { error: resultError } = await supabase
       .from("lab_results")
@@ -57,17 +62,14 @@ export default function LabValidation() {
       return
     }
 
-    // Update request status
-    const result = pendingResults.find(r => r.id === resultId)
-    if (result) {
-      const { error: requestError } = await supabase
-        .from("lab_requests")
-        .update({ status: "verified" })
-        .eq("id", result.request_id)
+    // Update lab request status to completed
+    const { error: requestError } = await supabase
+      .from("lab_requests")
+      .update({ status: "completed" })
+      .eq("id", result.request_id)
 
-      if (requestError) {
-        console.error("Failed to update request status", requestError)
-      }
+    if (requestError) {
+      console.error("Failed to update request status", requestError)
     }
 
     alert("Result approved and ready for release")
@@ -75,6 +77,13 @@ export default function LabValidation() {
   }
 
   const rejectResult = async (resultId: string, reason: string) => {
+    // Find the request_id for this result
+    const result = pendingResults.find(r => r.id === resultId)
+    if (!result) {
+      alert("Result not found")
+      return
+    }
+
     const { error } = await supabase
       .from("lab_results")
       .update({
@@ -88,10 +97,21 @@ export default function LabValidation() {
     if (error) {
       console.error("Failed to reject result", error)
       alert("Could not reject result")
-    } else {
-      alert("Result rejected")
-      loadPendingResults()
+      return
     }
+
+    // Update lab request status to cancelled
+    const { error: requestError } = await supabase
+      .from("lab_requests")
+      .update({ status: "cancelled" })
+      .eq("id", result.request_id)
+
+    if (requestError) {
+      console.error("Failed to update request status", requestError)
+    }
+
+    alert("Result rejected")
+    loadPendingResults()
   }
 
   if (loading) return <p className="p-6">Loading pending results...</p>

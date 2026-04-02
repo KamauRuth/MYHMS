@@ -8,7 +8,7 @@ const supabase = createClient()
 export default function LabRequests() {
   const [requests, setRequests] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [filter, setFilter] = useState("all") // all, pending, in_process, completed, verified, released
+  const [filter, setFilter] = useState("all") // all, pending, in_progress, completed, cancelled
 
   useEffect(() => {
     loadRequests()
@@ -54,7 +54,7 @@ export default function LabRequests() {
     }
   }
 
-  const statusOptions = ["pending", "in_process", "completed", "verified", "released"]
+  const statusOptions = ["pending", "in_progress", "completed", "cancelled"]
 
   if (loading) return <p className="p-6">Loading requests...</p>
 
@@ -72,10 +72,9 @@ export default function LabRequests() {
           >
             <option value="all">All</option>
             <option value="pending">Pending</option>
-            <option value="in_process">In Process</option>
+            <option value="in_progress">In Progress</option>
             <option value="completed">Completed</option>
-            <option value="verified">Verified</option>
-            <option value="released">Released</option>
+            <option value="cancelled">Cancelled</option>
           </select>
         </div>
 
@@ -86,8 +85,6 @@ export default function LabRequests() {
                 <th className="border p-2">Request ID</th>
                 <th className="border p-2">Patient</th>
                 <th className="border p-2">Test</th>
-                <th className="border p-2">Department</th>
-                <th className="border p-2">Urgency</th>
                 <th className="border p-2">Status</th>
                 <th className="border p-2">Actions</th>
               </tr>
@@ -100,8 +97,6 @@ export default function LabRequests() {
                     {request.visits?.patient?.first_name} {request.visits?.patient?.last_name}
                   </td>
                   <td className="border p-2">{request.lab_test_master?.test_name}</td>
-                  <td className="border p-2">{request.department}</td>
-                  <td className="border p-2">{request.urgency}</td>
                   <td className="border p-2">
                     <select
                       value={request.status}

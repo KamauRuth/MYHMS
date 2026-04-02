@@ -33,16 +33,15 @@ export default function PatientDashboard() {
         lab_requests!inner (
           id,
           visits!inner (
-            patient:patients(*)
+            patient_id,
+            patients(*)
           ),
           lab_test_master(*),
-          department,
-          urgency,
           created_at
         )
       `)
       .eq("status", "released")
-      .eq("lab_requests.visits.patient_id", patientId)
+      .filter("lab_requests.visits.patient_id", "eq", patientId)
       .order("created_at", { ascending: false })
 
     if (error) {
@@ -135,9 +134,9 @@ Report generated on: ${new Date().toLocaleString()}
                         {result.lab_requests.lab_test_master?.test_name}
                       </h3>
                       <p className="text-gray-600">
-                        Department: {result.lab_requests.department} |
+
                         Date: {new Date(result.lab_requests.created_at).toLocaleDateString()} |
-                        Urgency: {result.lab_requests.urgency}
+                        Test: {result.lab_requests.lab_test_master.test_name}
                       </p>
                       <p className="text-sm text-gray-500">
                         Released: {new Date(result.released_at || result.verified_at).toLocaleString()}

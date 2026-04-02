@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { jsPDF } from "jspdf"
 
 const supabase = createClient()
 
@@ -24,9 +25,7 @@ export default function LabResultDelivery() {
           visits!inner (
             patient:patients(*)
           ),
-          lab_test_master(*),
-          department,
-          urgency
+          lab_test_master(*)
         )
       `)
       .eq("status", "approved")
@@ -56,59 +55,106 @@ export default function LabResultDelivery() {
       return
     }
 
-    // Update request status
-    const result = approvedResults.find(r => r.id === resultId)
-    if (result) {
-      const { error: requestError } = await supabase
-        .from("lab_requests")
-        .update({ status: "released" })
-        .eq("id", result.request_id)
-
-      if (requestError) {
-        console.error("Failed to update request status", requestError)
-      }
-    }
-
+    // Lab request status already updated when result was approved
     alert("Result released to requesting department")
     loadApprovedResults()
   }
 
   const generatePDF = async (result: any) => {
-    // Basic PDF generation (in real implementation, use a library like jsPDF or server-side PDF generation)
-    const content = `
-LIFEPOINT HOSPITAL
-Laboratory Report
+    const doc = new jsPDF()
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const pageHeight = doc.internal.pageSize.getHeight()
+    let yPosition = 20
 
-Patient: ${result.lab_requests.visits?.patient?.first_name} ${result.lab_requests.visits?.patient?.last_name}
-Test: ${result.lab_requests.lab_test_master?.test_name}
-Date: ${new Date(result.verified_at).toLocaleDateString()}
+    // Title
+    doc.setFontSize(16)
+    doc.text("LIFEPOINT HOSPITAL", pageWidth / 2, yPosition, { align: "center" })
+    yPosition += 10
+    doc.setFontSize(12)
+    doc.text("Laboratory Report", pageWidth / 2, yPosition, { align: "center" })
+    yPosition += 15
 
-Results:
-${JSON.parse(result.results || "[]").map((param: any) =>
-  `${param.parameter}: ${param.result} ${param.units} (${param.reference_range}) ${param.abnormal ? '- ABNORMAL' : ''}`
-).join('\n')}
+    // Patient Info
+    doc.setFontSize(10)
+    doc.setFont(undefined, "bold")
+    doc.text("Patient Information", 20, yPosition)
+    yPosition += 7
+    doc.setFont(undefined, "normal")
+    doc.text(
+      `Name: ${result.lab_requests.visits?.patient?.first_name} ${result.lab_requests.visits?.patient?.last_name}`,
+      20,
+      yPosition
+    )
+    yPosition += 6
+    doc.text(`Test: ${result.lab_requests.lab_test_master?.test_name}`, 20, yPosition)
+    yPosition += 6
+    doc.text(`Date: ${new Date(result.verified_at).toLocaleDateString()}`, 20, yPosition)
+    yPosition += 12
 
-Comments: ${result.comments || 'None'}
+    // Results Table
+    doc.setFont(undefined, "bold")
+    doc.text("Test Results", 20, yPosition)
+    yPosition += 8
+    doc.setFont(undefined, "normal")
 
-Lab Stamp: ____________________
-Signature: ____________________
-    `
+    const results = JSON.parse(result.results || "[]")
+    const tableStartY = yPosition
 
-    // Create and download text file (placeholder for PDF)
-    const blob = new Blob([content], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `lab-report-${result.id}.txt`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    // Table headers
+    doc.setFont(undefined, "bold")
+    doc.setFontSize(9)
+    doc.text("Parameter", 20, yPosition)
+    doc.text("Result", 70, yPosition)
+    doc.text("Units", 110, yPosition)
+    doc.text("Reference Range", 140, yPosition)
+    yPosition += 7
+    doc.setDrawColor(0)
+    doc.line(20, yPosition, 195, yPosition)
+    yPosition += 5
+
+    // Table rows
+    doc.setFont(undefined, "normal")
+    results.forEach((param: any) => {
+      if (yPosition > pageHeight - 30) {
+        doc.addPage()
+        yPosition = 20
+      }
+      doc.text(param.parameter, 20, yPosition)
+      doc.text(param.result, 70, yPosition)
+      doc.text(param.units, 110, yPosition)
+      doc.text(param.reference_range || "N/A", 140, yPosition)
+      if (param.abnormal) {
+        doc.setTextColor(255, 0, 0)
+        doc.text("ABNORMAL", 180, yPosition)
+        doc.setTextColor(0, 0, 0)
+      }
+      yPosition += 7
+    })
+
+    // Comments
+    yPosition += 10
+    doc.setFont(undefined, "bold")
+    doc.text("Comments:", 20, yPosition)
+    yPosition += 6
+    doc.setFont(undefined, "normal")
+    const comments = result.comments || "None"
+    const commentLines = doc.splitTextToSize(comments, 170)
+    doc.text(commentLines, 20, yPosition)
+
+    // Footer
+    yPosition = pageHeight - 20
+    doc.setFontSize(8)
+    doc.setTextColor(128, 128, 128)
+    doc.text(`Report ID: ${result.id}`, 20, yPosition)
+    doc.text(`Generated: ${new Date().toLocaleString()}`, 130, yPosition)
+
+    // Save PDF
+    doc.save(`lab-report-${result.id}.pdf`)
   }
 
   const sendToDoctor = async (result: any) => {
     // In real implementation, this would send to doctor dashboard or email
-    alert(`Result sent to ${result.lab_requests.department} department`)
+    alert("Result sent to requesting department")
   }
 
   if (loading) return <p className="p-6">Loading approved results...</p>
@@ -131,9 +177,7 @@ Signature: ____________________
                       {result.lab_requests.visits?.patient?.first_name} {result.lab_requests.visits?.patient?.last_name}
                     </h3>
                     <p className="text-sm text-gray-600">
-                      Test: {result.lab_requests.lab_test_master?.test_name} |
-                      Department: {result.lab_requests.department} |
-                      Urgency: {result.lab_requests.urgency}
+                      Test: {result.lab_requests.lab_test_master?.test_name}
                     </p>
                     <p className="text-sm text-gray-500">
                       Approved: {new Date(result.verified_at).toLocaleString()}

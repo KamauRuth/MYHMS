@@ -13,13 +13,24 @@ export default function LabSamples() {
   const [samples, setSamples] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [request, setRequest] = useState<any>(null)
+  const [user, setUser] = useState<any>(null)
 
   useEffect(() => {
     if (requestId) {
       loadRequest()
       loadSamples()
+      loadUser()
     }
   }, [requestId])
+
+  const loadUser = async () => {
+    const { data, error } = await supabase.auth.getUser()
+    if (error) {
+      console.error("Failed to load user", error)
+    } else {
+      setUser(data.user)
+    }
+  }
 
   const loadRequest = async () => {
     const { data, error } = await supabase
@@ -101,7 +112,7 @@ export default function LabSamples() {
         <div className="space-y-2">
           {samples.map(sample => (
             <div key={sample.id} className="border rounded p-4">
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <div>
                   <strong>Sample ID:</strong> {sample.id}
                 </div>
@@ -121,7 +132,10 @@ export default function LabSamples() {
                   </select>
                 </div>
                 <div>
-                  <strong>Collected:</strong> {new Date(sample.collection_time).toLocaleString()}
+                  <strong>Collected:</strong> {sample.collected_at ? new Date(sample.collected_at).toLocaleString() : "Not set"}
+                </div>
+                <div>
+                  <strong>Collected By:</strong> {sample.collected_by || "Unknown"}
                 </div>
               </div>
               {sample.status === "rejected" && (
@@ -148,16 +162,15 @@ export default function LabSamples() {
               const formData = new FormData(e.target as HTMLFormElement)
               addSample({
                 sample_type: formData.get("sample_type"),
-                collection_time: new Date().toISOString(),
-                collected_by: formData.get("collected_by"),
-                status: "collected"
+                collected_at: new Date().toISOString(),
+                collected_by: user?.id,
+                storage_status: "collected"
               })
               ;(e.target as HTMLFormElement).reset()
             }}
             className="grid grid-cols-2 gap-4"
           >
             <input name="sample_type" placeholder="Sample Type (Blood, Urine, etc.)" required className="border rounded px-3 py-2" />
-            <input name="collected_by" placeholder="Collected By" required className="border rounded px-3 py-2" />
             <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 col-span-2">
               Add Sample
             </button>

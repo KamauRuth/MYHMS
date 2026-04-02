@@ -40,7 +40,7 @@ export default function LabDashboard() {
         ...prev,
         totalRequests: requests?.length || 0,
         pending: statusCounts.pending || 0,
-        inProcess: statusCounts.in_process || 0,
+        inProcess: statusCounts.in_progress || 0,
         completed: statusCounts.completed || 0
       }))
     }

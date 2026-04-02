@@ -508,10 +508,10 @@ CREATE TABLE IF NOT EXISTS public.lab_requests (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   visit_id uuid NOT NULL,
   test_id uuid NOT NULL,
+  department_id uuid NULL,
   lab_amount decimal(10,2) NULL,
   status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'in_progress', 'completed', 'cancelled')),
   payment_status text NOT NULL DEFAULT 'unpaid' CHECK (payment_status IN ('unpaid', 'paid', 'refunded')),
-  department text NULL, -- Department that ordered the test
   urgency text NOT NULL DEFAULT 'routine' CHECK (urgency IN ('routine', 'urgent', 'emergency')),
   results jsonb NULL, -- Test results stored here
   completed_at timestamp with time zone NULL,
@@ -521,7 +521,9 @@ CREATE TABLE IF NOT EXISTS public.lab_requests (
   CONSTRAINT lab_requests_visit_id_fkey FOREIGN KEY (visit_id)
     REFERENCES public.visits(id) ON DELETE CASCADE,
   CONSTRAINT lab_requests_test_id_fkey FOREIGN KEY (test_id)
-    REFERENCES public.lab_test_master(id) ON DELETE CASCADE
+    REFERENCES public.lab_test_master(id) ON DELETE CASCADE,
+  CONSTRAINT lab_requests_department_id_fkey FOREIGN KEY (department_id)
+    REFERENCES public.departments(id) ON DELETE SET NULL
 );
 
 -- Lab Test Master Table (Test Catalog)

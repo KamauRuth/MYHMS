@@ -182,8 +182,8 @@ export default function TriageForm() {
 
   router.push(
     clinic === "DENTAL"
-      ? "/(dental)/dental-queue"
-      : "/(opd)/opd-queue"
+      ? "/dental-queue"
+      : "/opd-queue"
   )
 }
 

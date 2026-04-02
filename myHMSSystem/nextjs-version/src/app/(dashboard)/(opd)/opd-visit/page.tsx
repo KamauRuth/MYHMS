@@ -46,6 +46,7 @@ export default function OPDVisit() {
   const [visit, setVisit] = useState<any>(null)
   const [patient, setPatient] = useState<any>(null)
   const [triage, setTriage] = useState<any>(null)
+  const [userDepartmentId, setUserDepartmentId] = useState<string | null>(null)
 
   // CONSULTATION
   const [chiefComplaint, setChiefComplaint] = useState("")
@@ -91,6 +92,32 @@ export default function OPDVisit() {
 
   const generateBookingId = () =>
     `LPH-OT-${Math.floor(1000 + Math.random() * 9000)}`
+
+  // =========================
+  // LOAD USER DEPARTMENT
+  // =========================
+  useEffect(() => {
+    const loadUserDept = async () => {
+      try {
+        const { data: userData, error: userError } = await supabase.auth.getUser()
+        if (!userError && userData.user) {
+          // Try to get department from user metadata or related table
+          const { data: profile } = await supabase
+            .from("employee_profiles")
+            .select("department_id")
+            .eq("user_id", userData.user.id)
+            .single()
+          
+          if (profile?.department_id) {
+            setUserDepartmentId(profile.department_id)
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load user department", err)
+      }
+    }
+    loadUserDept()
+  }, [])
 
   // =========================
   // LOAD VISIT + TRIAGE
@@ -341,22 +368,34 @@ const handleDiagnosisKeyDown = (e: any) => {
 }
 
  async function sendLab() {
-
-  for (const selectedTestId of labs) {
-
-    if (!selectedTestId) continue;
-
-    // 1️⃣ Fetch test details
-    const { data: test, error } = await supabase
-      .from("lab_test_master")
-      .select("id, test_name, price")
-      .eq("id", selectedTestId)
-      .single();
-
-    if (error || !test) {
-      console.error(error);
-      continue;
+  try {
+    if (!visit?.id) {
+      alert("Visit information not loaded. Please reload the page.");
+      return;
     }
+
+    const selectedTests = labs.filter(id => id);
+    if (selectedTests.length === 0) {
+      alert("Please select at least one lab test");
+      return;
+    }
+
+    for (const selectedTestId of labs) {
+
+      if (!selectedTestId) continue;
+
+      // 1️⃣ Fetch test details
+      const { data: test, error } = await supabase
+        .from("lab_test_master")
+        .select("id, test_name, price")
+        .eq("id", selectedTestId)
+        .single();
+
+      if (error || !test) {
+        console.error("Test fetch error:", error);
+        alert(`Failed to load test details`);
+        continue;
+      }
 
     // 2️⃣ Prevent duplicate requests
     const { data: existing } = await supabase
@@ -396,7 +435,13 @@ const handleDiagnosisKeyDown = (e: any) => {
         .single();
 
       if (invoiceError) {
-        console.error(invoiceError);
+        console.error("Invoice creation error:", {
+          message: invoiceError.message,
+          details: invoiceError.details,
+          hint: invoiceError.hint,
+          visitId: visit.id,
+          patientId: visit.patient_id
+        });
         continue;
       }
 
@@ -410,14 +455,21 @@ const handleDiagnosisKeyDown = (e: any) => {
         visit_id: visit.id,
         test_id: test.id,
         lab_amount: test.price,
-        status: "PENDING",
-        payment_status: "UNPAID"
+        department_id: userDepartmentId || null
       })
       .select()
       .single();
 
     if (requestError) {
-      console.error(requestError);
+      console.error("Lab request creation error:", {
+        message: requestError.message,
+        details: requestError.details,
+        hint: requestError.hint,
+        visitId: visit.id,
+        testId: test.id,
+        departmentId: userDepartmentId
+      });
+      alert(`Failed to create lab request: ${requestError.message || "Unknown error"}`);
       continue;
     }
 
@@ -435,7 +487,12 @@ const handleDiagnosisKeyDown = (e: any) => {
       });
 
     if (itemError) {
-      console.error(itemError);
+      console.error("Invoice item creation error:", {
+        message: itemError.message,
+        details: itemError.details,
+        invoiceId: invoice.id,
+        testId: test.id
+      });
       continue;
     }
 
@@ -443,6 +500,10 @@ const handleDiagnosisKeyDown = (e: any) => {
   }
 
   alert("Lab requests created and added to billing.");
+  } catch (err) {
+    console.error("Unexpected error in sendLab:", err);
+    alert("An unexpected error occurred while creating lab requests");
+  }
 }
  const sendPrescription = async () => {
   try {

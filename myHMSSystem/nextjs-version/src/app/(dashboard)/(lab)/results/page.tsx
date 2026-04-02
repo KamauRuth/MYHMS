@@ -15,6 +15,8 @@ export default function LabResults() {
   const [results, setResults] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [urgency, setUrgency] = useState("normal")
+  const [comments, setComments] = useState("")
 
   useEffect(() => {
     if (requestId) {
@@ -122,7 +124,9 @@ export default function LabResults() {
       results: JSON.stringify(results),
       status: "pending_verification",
       technician_id: "current_user", // TODO: get from auth
-      entered_at: new Date().toISOString()
+      entered_at: new Date().toISOString(),
+      urgency: urgency,
+      comments: comments
     }
 
     const { error } = await supabase
@@ -213,10 +217,27 @@ export default function LabResults() {
           <p className="text-gray-500">No template found for this test. Please configure result template first.</p>
         )}
 
-        <div className="mt-6">
+        <div className="mt-6 space-y-4">
+          <div>
+            <label className="block mb-2">
+              <span className="font-semibold">Urgency Level:</span>
+              <select
+                value={urgency}
+                onChange={(e) => setUrgency(e.target.value)}
+                className="w-full border rounded px-3 py-2 mt-1"
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+              </select>
+            </label>
+          </div>
+
           <label className="block mb-2">
             <span className="font-semibold">Comments:</span>
             <textarea
+              value={comments}
+              onChange={(e) => setComments(e.target.value)}
               className="w-full border rounded px-3 py-2 mt-1"
               rows={3}
               placeholder="Additional comments or interpretation"
