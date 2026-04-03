@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "setup-users": "node scripts/setup-test-users.js"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

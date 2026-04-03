@@ -32,10 +32,13 @@ export default function PharmacyDashboard() {
           .eq("status", "pending")
 
         // Get low stock drugs
-        const { data: lowStockDrugs, error: e2 } = await supabase
+        const { data: allBatches, error: e2 } = await supabase
           .from("drug_batches")
-          .select("id")
-          .lt("quantity_in_stock", "reorder_level")
+          .select("id, quantity_in_stock, drugs(reorder_level)")
+        
+        const lowStockDrugs = allBatches?.filter((b: any) => 
+          b.quantity_in_stock < (b.drugs?.reorder_level || 50)
+        ) || []
 
         // Get drugs expiring within 30 days
         const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)

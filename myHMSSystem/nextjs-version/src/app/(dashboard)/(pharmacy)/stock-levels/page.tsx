@@ -35,25 +35,11 @@ export default function StockLevelsPage() {
         `
         )
 
-      // Apply filter
-      if (filter === "low_stock") {
-        query = query.lt("quantity_in_stock", "reorder_level")
-      } else if (filter === "expired") {
-        query = query.lt("expiry_date", new Date().toISOString().split("T")[0])
-      } else if (filter === "expiring_soon") {
-        const thirtyDaysFromNow = new Date(new Date().getTime() + 30 * 24 * 60 * 60 * 1000)
-        query = query
-          .lt("expiry_date", thirtyDaysFromNow.toISOString().split("T")[0])
-          .gt("expiry_date", new Date().toISOString().split("T")[0])
-      }
-
       // Apply sorting
       if (sortBy === "expiry") {
         query = query.order("expiry_date", { ascending: true })
       } else if (sortBy === "quantity") {
         query = query.order("quantity_in_stock", { ascending: true })
-      } else if (sortBy === "drug") {
-        query = query.order("drug_name", { ascending: true })
       }
 
       const { data, error } = await query
@@ -61,7 +47,26 @@ export default function StockLevelsPage() {
       if (error) {
         console.error("Failed to load stock levels:", error)
       } else {
-        setBatches(data || [])
+        // Apply filter on client side
+        let filteredData = data || []
+        const today = new Date().toISOString().split("T")[0]
+        const thirtyDaysFromNow = new Date(new Date().getTime() + 30 * 24 * 60 * 60 * 1000)
+          .toISOString()
+          .split("T")[0]
+
+        if (filter === "low_stock") {
+          filteredData = filteredData.filter((b: any) => 
+            b.quantity_in_stock < (b.drugs?.reorder_level || 50)
+          )
+        } else if (filter === "expired") {
+          filteredData = filteredData.filter((b: any) => b.expiry_date < today)
+        } else if (filter === "expiring_soon") {
+          filteredData = filteredData.filter((b: any) => 
+            b.expiry_date >= today && b.expiry_date <= thirtyDaysFromNow
+          )
+        }
+
+        setBatches(filteredData)
       }
     } finally {
       setLoading(false)

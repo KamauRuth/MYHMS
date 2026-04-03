@@ -46,7 +46,7 @@ export default function OPDVisit() {
   const [visit, setVisit] = useState<any>(null)
   const [patient, setPatient] = useState<any>(null)
   const [triage, setTriage] = useState<any>(null)
-  const [userDepartmentId, setUserDepartmentId] = useState<string | null>(null)
+  const [userDepartmentId, setUserDepartmentId] = useState<string | null>(null) // Department UUID from departments table
 
   // CONSULTATION
   const [chiefComplaint, setChiefComplaint] = useState("")
@@ -75,10 +75,10 @@ export default function OPDVisit() {
     test.test_name.toLowerCase().includes(search.toLowerCase()))
 
   // PHARMACY
-  const [drugs, setDrugs] = useState([{ name: "", dose: "", frequency: "" }])
+  const [drugs, setDrugs] = useState([{ drug_id: "", quantity: "", frequency: "", route: "oral", specialInstructions: "" }])
   const [departments, setDepartments] = useState<any[]>([])
   const [selectedDepartmentId, setSelectedDepartmentId] = useState<string>("")
-  const [allDrugs, setAllDrugs] = useState([]) 
+  const [allDrugs, setAllDrugs] = useState<any[]>([]) 
 
 
   // THEATRE / SURGERY
@@ -93,30 +93,59 @@ export default function OPDVisit() {
   const generateBookingId = () =>
     `LPH-OT-${Math.floor(1000 + Math.random() * 9000)}`
 
+  // User department loading is handled through selectedDepartmentId state
+  // which is set via the prescription department selector dropdown
+
   // =========================
-  // LOAD USER DEPARTMENT
+  // LOAD OPD DEPARTMENT UUID FROM DEPARTMENTS TABLE
   // =========================
   useEffect(() => {
-    const loadUserDept = async () => {
+    const loadDepartmentUUID = async () => {
       try {
         const { data: userData, error: userError } = await supabase.auth.getUser()
-        if (!userError && userData.user) {
-          // Try to get department from user metadata or related table
-          const { data: profile } = await supabase
-            .from("employee_profiles")
-            .select("department_id")
-            .eq("user_id", userData.user.id)
-            .single()
+        if (userError || !userData.user) return
+
+        // Get user's role from profiles table
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", userData.user.id)
+          .maybeSingle()
+
+        if (!profileError && profile?.role) {
+          // Map role to department name (must match department names in your departments table)
+          const roleToDepartmentName: { [key: string]: string } = {
+            "DOCTOR": "OPD",
+            "NURSE": "OPD",
+            "LAB": "Laboratory",
+            "PHARMACY": "Pharmacy",
+            "RECEPTION": "Reception",
+            "FINANCE": "Finance",
+            "ADMIN": "OPD"
+          }
+
+          const departmentName = roleToDepartmentName[profile.role] || "OPD"
           
-          if (profile?.department_id) {
-            setUserDepartmentId(profile.department_id)
+          // Fetch the department UUID from departments table
+          const { data: dept, error: deptError } = await supabase
+            .from("departments")
+            .select("id")
+            .eq("name", departmentName)
+            .eq("is_active", true)
+            .maybeSingle()
+
+          if (!deptError && dept?.id) {
+            setUserDepartmentId(dept.id)
+          } else {
+            console.warn(`Department "${departmentName}" not found or inactive in database`)
           }
         }
       } catch (err) {
-        console.error("Failed to load user department", err)
+        console.error("Failed to load department UUID:", err)
       }
     }
-    loadUserDept()
+
+    loadDepartmentUUID()
   }, [])
 
   // =========================
@@ -136,7 +165,7 @@ export default function OPDVisit() {
 
       if (visitError || !visitData) {
         alert("Visit not found")
-        router.push("/(opd)/opd-queue")
+        router.push("/opd-queue")
         return
       }
 
@@ -171,6 +200,29 @@ export default function OPDVisit() {
 
   fetchLabs()
 }, [])
+
+  // =========================
+  // LOAD PHARMACY DRUGS
+  // =========================
+  useEffect(() => {
+    const fetchDrugs = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("drugs")
+          .select("id, drug_name, generic_name, reorder_level")
+          .eq("is_active", true)
+          .order("drug_name", { ascending: true })
+
+        if (!error && data) {
+          setAllDrugs(data)
+        }
+      } catch (err) {
+        console.error("Failed to load drugs", err)
+      }
+    }
+
+    fetchDrugs()
+  }, [])
 
   // =========================
   // LOAD LAB REQUESTS
@@ -507,33 +559,76 @@ const handleDiagnosisKeyDown = (e: any) => {
 }
  const sendPrescription = async () => {
   try {
+    // Validate form
     const clean = drugs.filter(d => d.drug_id && d.quantity)
-    if (!clean.length) return alert("Add medication")
+    if (!clean.length) return alert("Add at least one medication")
 
     if (!selectedDepartmentId) {
-      return alert("Select department")
+      return alert("Select a department for this prescription")
     }
 
-    const payload = clean.map(d => ({
-      patient_visit_id: visitId,
+    if (!visit?.id || !patient?.id) {
+      return alert("Visit or patient information missing")
+    }
+
+    // Generate unique prescription number
+    const prescriptionNumber = `RX-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`
+
+    // Get current user
+    const { data: userData } = await supabase.auth.getUser()
+    const userId = userData.user?.id
+
+    // 1️⃣ Create prescription record
+    const { data: prescriptionData, error: prescError } = await supabase
+      .from("prescriptions")
+      .insert({
+        prescription_number: prescriptionNumber,
+        patient_id: patient.id,
+        visit_id: visit.id,
+        prescribed_by: userId,
+        department: "opd", // Source department is OPD
+        source_type: "opd_visit",
+        source_id: visit.id,
+        status: "pending",
+        notes: `Prescribed at OPD visit from department: ${selectedDepartmentId}`
+      })
+      .select()
+      .single()
+
+    if (prescError || !prescriptionData) {
+      console.error("Prescription creation error:", prescError)
+      return alert(`Failed to create prescription: ${prescError?.message}`)
+    }
+
+    // 2️⃣ Create prescription items
+    const prescriptionItems = clean.map(d => ({
+      prescription_id: prescriptionData.id,
       drug_id: d.drug_id,
-      quantity: d.quantity,
-      status: "PENDING",
-      department_id: selectedDepartmentId,
-      prescribed_by: "doctor-user-id"
+      quantity_prescribed: d.quantity,
+      frequency: d.frequency || "As directed",
+      route: d.route || "Oral", // From drug form if available
+      special_instructions: d.specialInstructions || null,
+      status: "pending"
     }))
 
-    const { error } = await supabase
-      .from("prescriptions")
-      .insert(payload)
+    const { error: itemsError } = await supabase
+      .from("prescription_items")
+      .insert(prescriptionItems)
 
-    if (error) throw error
+    if (itemsError) {
+      console.error("Prescription items error:", itemsError)
+      // Try to delete the prescription if items fail
+      await supabase.from("prescriptions").delete().eq("id", prescriptionData.id)
+      return alert(`Failed to add prescription items: ${itemsError.message}`)
+    }
 
-    alert("Sent to pharmacy")
-    setDrugs([])
-  } catch (err) {
-    console.error(err)
-    alert("Failed to send prescription")
+    // 3️⃣ Success - Reset form and notify
+    alert(`✅ Prescription sent to pharmacy!\nRx #: ${prescriptionNumber}`)
+    setDrugs([{ drug_id: "", quantity: "", frequency: "", route: "" }])
+    
+  } catch (err: any) {
+    console.error("Error in sendPrescription:", err)
+    alert(`Failed to send prescription: ${err.message}`)
   }
 }
   const closeConsultation = async () => {
@@ -782,70 +877,113 @@ const handleDiagnosisKeyDown = (e: any) => {
 
   {/* Drug Rows */}
   {drugs.map((d, i) => (
-    <div key={i} className="grid md:grid-cols-5 gap-3">
+    <div key={i} className="grid md:grid-cols-6 gap-3 items-end">
       
       {/* Drug Select */}
-      <select
-        className="border rounded-lg p-3"
-        value={d.drug_id || ""}
-        onChange={e => {
-          const selected = allDrugs.find(dr => dr.id === e.target.value)
-          const c = [...drugs]
-          c[i].drug_id = selected.id
-          c[i].name = selected.generic_name
-          c[i].price = selected.selling_price
-          setDrugs(c)
-        }}
-      >
-        <option value="">Select Drug</option>
-        {allDrugs.map(dr => (
-          <option key={dr.id} value={dr.id}>
-            {dr.generic_name} ({dr.brand_name})
-          </option>
-        ))}
-      </select>
+      <div>
+        <label className="text-xs font-medium text-gray-600">Drug</label>
+        <select
+          className="border rounded-lg p-3 w-full"
+          value={d.drug_id || ""}
+          onChange={e => {
+            const selected = allDrugs.find(dr => dr.id === e.target.value)
+            const c = [...drugs]
+            c[i].drug_id = selected.id
+            setDrugs(c)
+          }}
+        >
+          <option value="">Select Drug</option>
+          {allDrugs.map(dr => (
+            <option key={dr.id} value={dr.id}>
+              {dr.drug_name} ({dr.generic_name})
+            </option>
+          ))}
+        </select>
+      </div>
 
       {/* Quantity */}
-      <input
-        type="number"
-        className="border rounded-lg p-3"
-        placeholder="Qty"
-        value={d.quantity || ""}
-        onChange={e => {
-          const c = [...drugs]
-          c[i].quantity = parseInt(e.target.value)
-          setDrugs(c)
-        }}
-      />
-
-      {/* Dose */}
-      <input
-        className="border rounded-lg p-3"
-        placeholder="Dose"
-        value={d.dose || ""}
-        onChange={e => {
-          const c = [...drugs]
-          c[i].dose = e.target.value
-          setDrugs(c)
-        }}
-      />
+      <div>
+        <label className="text-xs font-medium text-gray-600">Qty</label>
+        <input
+          type="number"
+          className="border rounded-lg p-3 w-full"
+          placeholder="0"
+          value={d.quantity || ""}
+          onChange={e => {
+            const c = [...drugs]
+            c[i].quantity = parseInt(e.target.value) || ""
+            setDrugs(c)
+          }}
+        />
+      </div>
 
       {/* Frequency */}
-      <input
-        className="border rounded-lg p-3"
-        placeholder="Frequency"
-        value={d.frequency || ""}
-        onChange={e => {
-          const c = [...drugs]
-          c[i].frequency = e.target.value
-          setDrugs(c)
-        }}
-      />
-
-      {/* Price Display */}
-      <div className="flex items-center justify-center bg-gray-100 rounded-lg p-2">
-        {d.price ? `KES ${d.price}` : "-"}
+      <div>
+        <label className="text-xs font-medium text-gray-600">Frequency</label>
+        <select
+          className="border rounded-lg p-3 w-full"
+          value={d.frequency || "OD"}
+          onChange={e => {
+            const c = [...drugs]
+            c[i].frequency = e.target.value
+            setDrugs(c)
+          }}
+        >
+          <option value="OD">Once daily</option>
+          <option value="BD">Twice daily</option>
+          <option value="TDS">3x daily</option>
+          <option value="QID">4x daily</option>
+          <option value="PRN">As needed</option>
+        </select>
       </div>
+
+      {/* Route */}
+      <div>
+        <label className="text-xs font-medium text-gray-600">Route</label>
+        <select
+          className="border rounded-lg p-3 w-full"
+          value={d.route || "oral"}
+          onChange={e => {
+            const c = [...drugs]
+            c[i].route = e.target.value
+            setDrugs(c)
+          }}
+        >
+          <option value="oral">Oral</option>
+          <option value="iv">IV</option>
+          <option value="im">IM</option>
+          <option value="sc">SC</option>
+          <option value="topical">Topical</option>
+          <option value="inhaled">Inhaled</option>
+          <option value="rectal">Rectal</option>
+        </select>
+      </div>
+
+      {/* Special Instructions */}
+      <div>
+        <label className="text-xs font-medium text-gray-600">Instructions</label>
+        <input
+          className="border rounded-lg p-3 w-full"
+          placeholder="e.g., with food"
+          value={d.specialInstructions || ""}
+          onChange={e => {
+            const c = [...drugs]
+            c[i].specialInstructions = e.target.value
+            setDrugs(c)
+          }}
+        />
+      </div>
+
+      {/* Remove button */}
+      <button
+        className="bg-red-100 text-red-600 px-3 py-2 rounded-lg hover:bg-red-200 text-sm"
+        onClick={() => {
+          const c = drugs.filter((_, idx) => idx !== i)
+          setDrugs(c.length ? c : [{ drug_id: "", quantity: "", frequency: "", route: "oral" }])
+        }}
+      >
+        Remove
+      </button>
     </div>
   ))}
 
@@ -936,10 +1074,15 @@ const handleDiagnosisKeyDown = (e: any) => {
     </button>
 
     <button
-      onClick={() =>
-        router.push(`/admit?visit_id=${visit.id}&patient_id=${patient.patient_id}`)
-      }
-      className="bg-purple-600 text-white px-4 py-2 rounded"
+      onClick={() => {
+        if (!patient || !patient.id) {
+          alert("Patient data not loaded")
+          return
+        }
+        router.push(`/admit?visit_id=${visit.id}&patient_id=${patient.id}`)
+      }}
+      className="bg-purple-600 text-white px-4 py-2 rounded disabled:opacity-50"
+      disabled={!patient}
       >
       Admit to IPD
     </button>

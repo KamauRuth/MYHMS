@@ -35,9 +35,9 @@ export async function updateSession(request: NextRequest) {
     const is_public_route = public_routes.includes(pathname)
 
     if (user && is_public_route) {
-      // user is authenticated but is on a public route, potentially respond by redirecting the user to the home page
+      // user is authenticated but is on a public route, redirect to dashboard
       const url = request.nextUrl.clone()
-      url.pathname = '/'
+      url.pathname = '/dashboard'
       return NextResponse.redirect(url)
     } 
 

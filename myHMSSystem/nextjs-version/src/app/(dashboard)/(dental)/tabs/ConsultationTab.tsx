@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client"
 
 const supabase = createClient()
 
-export default function ConsultationTab({ visit }) {
+export default function ConsultationTab({ visit }: { visit: any }) {
   const [complaint, setComplaint] = useState(visit.chief_complaint || "")
   const [history, setHistory] = useState(visit.history || "")
 

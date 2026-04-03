@@ -13,10 +13,24 @@ export default function AdmitPatient() {
   const searchParams = useSearchParams()
 
   const visitId = searchParams.get("visit_id")
-  const patientId = searchParams.get("patients_id")
+  const patientId = searchParams.get("patient_id")
 
   console.log("visitId:", visitId)
-  console.log("patientsId:", patientId)
+  console.log("patientId:", patientId)
+
+  // Show error if IDs are missing
+  if (!visitId || !patientId) {
+    return (
+      <div className="p-8 max-w-xl mx-auto">
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
+          <p className="font-bold">Error</p>
+          <p>Missing patient ID or visit ID. Please go back and try again.</p>
+          <p className="text-sm mt-2">Visit ID: {visitId}</p>
+          <p className="text-sm">Patient ID: {patientId}</p>
+        </div>
+      </div>
+    )
+  }
 
   const [ward, setWard] = useState("")
   const [bed, setBed] = useState("")
@@ -50,6 +64,11 @@ export default function AdmitPatient() {
   // ✅ Admit function
   async function admit() {
 
+    if (!patientId || !visitId) {
+      alert("Missing patient or visit ID")
+      return
+    }
+
     if (!ward || !bed) {
       alert("Ward and bed are required")
       return
@@ -63,7 +82,7 @@ export default function AdmitPatient() {
         visit_id: visitId,
         patient_id: patientId,
         ward: ward,
-        bed_number: bed,
+        bed_no: bed,
         reason: reason
       })
 

@@ -5,7 +5,7 @@ import { createClient } from "@/lib/supabase/client"
 
 const supabase = createClient()
 
-export default function ProceduresTab({ visit }) {
+export default function ProceduresTab({ visit }: { visit: any }) {
   const [procedures, setProcedures] = useState<any[]>([])
   const [selected, setSelected] = useState("")
   const [tooth, setTooth] = useState("")

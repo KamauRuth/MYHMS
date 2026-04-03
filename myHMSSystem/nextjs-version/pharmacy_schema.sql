@@ -121,11 +121,7 @@ CREATE TABLE IF NOT EXISTS public.prescriptions (
   notes text NULL,
   created_at timestamp with time zone DEFAULT now(),
   updated_at timestamp with time zone DEFAULT now(),
-  CONSTRAINT prescriptions_pkey PRIMARY KEY (id),
-  CONSTRAINT prescriptions_patient_id_fkey FOREIGN KEY (patient_id)
-    REFERENCES public.patients(id) ON DELETE CASCADE,
-  CONSTRAINT prescriptions_visit_id_fkey FOREIGN KEY (visit_id)
-    REFERENCES public.visits(id) ON DELETE CASCADE
+  CONSTRAINT prescriptions_pkey PRIMARY KEY (id)
 );
 
 -- ============================================

@@ -8,7 +8,7 @@ const supabase = createClient()
 const upperTeeth = Array.from({ length: 16 }, (_, i) => i + 1)
 const lowerTeeth = Array.from({ length: 16 }, (_, i) => i + 17)
 
-export default function OdontogramTab({ visitId }) {
+export default function OdontogramTab({ visitId }: { visitId: any }) {
   const [records, setRecords] = useState<any[]>([])
   const [selectedTooth, setSelectedTooth] = useState<number | null>(null)
   const [condition, setCondition] = useState("caries")

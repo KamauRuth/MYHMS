@@ -202,33 +202,30 @@ const data = {
           url:"#",
           icon: LayoutPanelLeft,
           items:[
-            {
-              title:"Dashboard",
-              url:"/lab"
-            },
+         
             {
               title:"Test Master",
-              url:"/lab-master"
+              url:"/lab/lab-master"
             },
             {
               title:"Test Requests",
-              url:"/lab-requests"
+              url:"/lab/lab-requests"
             },
             {
               title:"Sample Management",
-              url:"/samples"
+              url:"/lab/samples"
             },
             {
               title:"Result Entry",
-              url:"/results"
+              url:"/lab/results"
             },
             {
               title:"Result Validation",
-              url:"/validation"
+              url:"/lab/validation"
             },
             {
               title:"Result Delivery",
-              url:"/delivery"
+              url:"/lab/delivery"
             },
             {
               title:"Critical Alerts",
@@ -250,16 +247,45 @@ const data = {
           url:"#",
           icon: LayoutPanelLeft,
           items:[
-            {
-              title:"Dashboard",
-              url:"/pharmacy"
-            },
+           
             {
               title:"Stock Management",
-              url:"/pharmacy"
+              url:"/stock-management"
+            },
+            {
+              title:"Prescriptions",
+              url:"/prescriptions"
+            },
+            {
+              title:"Dispensing",
+              url:"/dispensing"
+            },
+            {
+              title:"Department Requests",
+              url:"/department-requests"
+            },
+            {
+              title:"Suppliers",
+              url:"/suppliers"
+            },
+            {
+              title:"Stock Levels",
+              url:"/stock-levels"
+            },
+            {
+              title:"Expiry Alerts",
+              url:"/expiry-alerts"
+            },
+            {
+              title:"Reports",
+              url:"/reports"
             }
-          ]
+          ]       
+
+
         },
+
+   
 
         {
           title:"Theatre",
@@ -323,6 +349,39 @@ const data = {
               url:"/dental-visit"
             }
           ]
+        },
+
+        {
+          title:"IPD",
+          url:"#",
+          icon: LayoutPanelLeft,
+          items:[
+            { 
+              title:"IPD Dashboard",
+              url:"/ipd"
+            },
+            {
+              title:"Admissions",
+              url:"/ipd/admissions"
+            },
+            {
+              title:"Vitals",
+              url:"/ipd/vitals"
+            },
+            {
+              title:"Medications",
+              url:"/ipd/medications"
+            },    
+            {
+              title:"Procedures",
+              url:"/ipd/procedures"
+            },
+            {
+              title:"Discharge",
+              url:"/ipd/discharge"
+            }
+          ] 
+        
         },
 
         {

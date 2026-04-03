@@ -6,6 +6,7 @@ import { Separator } from "@/components/ui/separator"
 import { SidebarTrigger } from "@/components/ui/sidebar"
 import { CommandSearch, SearchTrigger } from "@/components/command-search"
 import { ModeToggle } from "@/components/mode-toggle"
+import { HeaderProfile } from "@/components/header-profile"
 
 export function SiteHeader() {
   const [searchOpen, setSearchOpen] = React.useState(false)
@@ -66,6 +67,7 @@ export function SiteHeader() {
               </a>
             </Button>
             <ModeToggle />
+            <HeaderProfile />
           </div>
         </div>
       </header>
