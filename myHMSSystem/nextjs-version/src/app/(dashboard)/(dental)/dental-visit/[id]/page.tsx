@@ -25,32 +25,60 @@ export default function DentalVisitPage() {
   }, [id])
 
   const fetchVisit = async () => {
-    const { data, error } = await supabase
+    // First try to fetch from dental_visits table (the primary visit type for this page)
+    const { data: dentalVisit, error: dentalError } = await supabase
+      .from("dental_visits")
+      .select(`
+        *,
+        patients(first_name, last_name, phone)
+      `)
+      .eq("id", id)
+      .single()
+
+    if (!dentalError && dentalVisit) {
+      setVisit(dentalVisit)
+      return
+    }
+
+    // Fallback: try regular visits table
+    const { data: regularVisit, error } = await supabase
       .from("visits")
       .select(`
         *,
-        patients(first_name, last_name, phone),
-        dental_visits(status)
+        patients(first_name, last_name, phone)
       `)
       .eq("id", id)
       .single()
 
     if (error) {
-      console.error(error)
+      console.error("Visit not found:", error)
       return
     }
 
-    setVisit(data)
+    setVisit(regularVisit)
   }
 
   const updateStatus = async (status: string) => {
-    if (!id) return
-    const { error } = await supabase
-      .from("visits")
-      .update({ status })
-      .eq("id", id)
+    if (!id || !visit) return
 
-    if (error) console.error(error)
+    // Update the dental_visits table if it's a dental visit
+    if (visit.table_name === 'dental_visits' || visit.visit_type === 'dental') {
+      const { error } = await supabase
+        .from("dental_visits")
+        .update({ status })
+        .eq("id", id)
+
+      if (error) console.error("Error updating dental visit:", error)
+    } else {
+      // Fallback: update visits table
+      const { error } = await supabase
+        .from("visits")
+        .update({ status })
+        .eq("id", id)
+
+      if (error) console.error("Error updating visit:", error)
+    }
+
     fetchVisit()
   }
 

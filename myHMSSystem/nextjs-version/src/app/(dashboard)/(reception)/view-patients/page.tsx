@@ -53,6 +53,7 @@ export default function ViewPatients() {
 
       const selectedService = services.find(s => s.id === form.service)
       const serviceName = selectedService?.name || "General"
+      const servicePrice = selectedService?.price || 0
 
       // 🔥 DETECT DENTAL SERVICE
       const isDental = serviceName.toLowerCase().includes("tooth") ||
@@ -61,26 +62,75 @@ export default function ViewPatients() {
 
       const clinic = isDental ? "DENTAL" : "GENERAL"
 
-      const { error } = await supabase.from("visits").insert({
+      // 1️⃣ CREATE VISIT
+      const { data: newVisit, error: visitError } = await supabase.from("visits").insert({
         patient_id: patientId,
         visit_type: serviceName,
-        clinic: clinic, // ✅ IMPORTANT
+        clinic: clinic,
         payment_method: form.payment_method,
         payment_status: "paid",
         visit_no: generateVisitNo(),
         status: "TRIAGE",
         triage_status: "pending"
-      })
+      }).select().single()
 
-      if (error) throw error
+      if (visitError) throw visitError
+
+      // 2️⃣ SILENTLY CREATE INVOICE FOR SERVICE (NON-BLOCKING)
+      if (servicePrice > 0) {
+        try {
+          // Check if invoice exists
+          let { data: existingInvoice } = await supabase
+            .from("invoices")
+            .select("*")
+            .eq("patient_id", patientId)
+            .eq("visit_id", newVisit.id)
+            .maybeSingle()
+
+          if (!existingInvoice) {
+            // Create new invoice
+            const invoiceNumber = `INV-${Date.now()}`
+            const { data: newInvoice } = await supabase
+              .from("invoices")
+              .insert({
+                patient_id: patientId,
+                visit_id: newVisit.id,
+                invoice_number: invoiceNumber,
+                status: "unpaid",
+                total_amount: servicePrice,
+                paid_amount: 0,
+                balance: servicePrice
+              })
+              .select()
+              .single()
+
+            // Add line item
+            if (newInvoice) {
+              await supabase.from("invoice_items").insert({
+                invoice_id: newInvoice.id,
+                item_type: "reception_service",
+                item_id: form.service,
+                description: serviceName,
+                quantity: 1,
+                unit_price: servicePrice,
+                total_price: servicePrice
+              })
+            }
+          }
+        } catch (billingError) {
+          console.error("Billing error (non-blocking):", billingError)
+          // Don't fail visit creation if billing fails
+        }
+      }
 
       alert(`Visit created → Sent to TRIAGE (${clinic})`)
 
       setIsDialogOpen(false)
+      fetchPatients()
 
     } catch (err: any) {
       console.error(err)
-      alert("Failed to create visit")
+      alert("Failed to create visit: " + err.message)
     } finally {
       setLoadingId(null)
     }

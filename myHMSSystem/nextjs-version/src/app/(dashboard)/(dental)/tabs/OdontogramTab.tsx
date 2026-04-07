@@ -12,18 +12,61 @@ export default function OdontogramTab({ visitId }: { visitId: any }) {
   const [records, setRecords] = useState<any[]>([])
   const [selectedTooth, setSelectedTooth] = useState<number | null>(null)
   const [condition, setCondition] = useState("caries")
+  const [dentalVisitId, setDentalVisitId] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetchRecords()
-  }, [])
+    initializeDentalVisit()
+  }, [visitId])
 
-  const fetchRecords = async () => {
+  const initializeDentalVisit = async () => {
+    try {
+      // Check if dental_visit exists
+      const { data: existing, error: existingError } = await supabase
+        .from("dental_visits")
+        .select("id")
+        .eq("id", visitId)
+        .single()
+
+      if (!existingError && existing) {
+        // Dental visit exists, use it
+        setDentalVisitId(existing.id)
+        fetchRecords(existing.id)
+        return
+      }
+
+      // Dental visit doesn't exist, create it
+      const { data: newVisit, error: createError } = await supabase
+        .from("dental_visits")
+        .insert({
+          id: visitId, // Use the provided ID
+          status: "in-chair" // Use valid status from database check constraint
+        })
+        .select()
+        .single()
+
+      if (createError) {
+        console.error("Error creating dental visit:", createError)
+        setLoading(false)
+        return
+      }
+
+      setDentalVisitId(newVisit.id)
+      fetchRecords(newVisit.id)
+    } catch (err) {
+      console.error("Error initializing dental visit:", err)
+      setLoading(false)
+    }
+  }
+
+  const fetchRecords = async (dvId: string) => {
     const { data } = await supabase
       .from("odontogram_records")
       .select("*")
-      .eq("dental_visit_id", visitId)
+      .eq("dental_visit_id", dvId)
 
     setRecords(data || [])
+    setLoading(false)
   }
 
   const getCondition = (tooth: number) => {
@@ -41,17 +84,23 @@ export default function OdontogramTab({ visitId }: { visitId: any }) {
   }
 
   const saveCondition = async () => {
-    if (!selectedTooth) return
+    if (!selectedTooth || !dentalVisitId) return
 
-    await supabase.from("odontogram_records").insert({
-      dental_visit_id: visitId,
-      tooth_number: selectedTooth.toString(),
-      condition,
-      status: "existing"
-    })
+    try {
+      await supabase.from("odontogram_records").insert({
+        dental_visit_id: dentalVisitId,
+        tooth_number: selectedTooth.toString(),
+        condition,
+        status: "existing"
+      })
 
-    setSelectedTooth(null)
-    fetchRecords()
+      setSelectedTooth(null)
+      fetchRecords(dentalVisitId)
+      alert("Tooth condition saved")
+    } catch (err) {
+      console.error("Error saving condition:", err)
+      alert("Failed to save condition")
+    }
   }
 
   const Tooth = ({ number }: { number: number }) => (
@@ -63,6 +112,8 @@ export default function OdontogramTab({ visitId }: { visitId: any }) {
       {number}
     </button>
   )
+
+  if (loading) return <p>Loading odontogram...</p>
 
   return (
     <div className="space-y-6">

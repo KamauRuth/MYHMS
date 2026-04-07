@@ -281,15 +281,106 @@ const bookForSurgery = async () => {
     const clean = labs.filter(Boolean)
     if (!clean.length) return alert("Add at least one lab test")
 
-    await supabase.from("lab_requests").insert(
-      clean.map(test => ({
+    try {
+      // Get patient and visit info
+      const patientId = patient?.id
+      if (!visitId || !patientId) {
+        return alert("Patient or visit information missing")
+      }
+
+      // Create lab requests
+      const insertData = clean.map(test => ({
         visit_id: visitId,
         test_name: test,
-        status: "PENDING",
+        status: "pending",
       }))
-    )
 
-    alert("Sent to lab")
+      const { error: labError } = await supabase
+        .from("lab_requests")
+        .insert(insertData)
+
+      if (labError) {
+        console.error("Lab request error:", labError)
+        return alert("Failed to create lab request: " + labError.message)
+      }
+
+      // SILENT BILLING: Auto-create invoice
+      try {
+        // Check if invoice exists
+        const { data: existingInvoice } = await supabase
+          .from("invoices")
+          .select("*")
+          .eq("visit_id", visitId)
+          .maybeSingle()
+
+        let invoice = existingInvoice
+
+        if (!invoice) {
+          const { data: newInvoice, error: invoiceError } = await supabase
+            .from("invoices")
+            .insert({
+              visit_id: visitId,
+              patient_id: patientId,
+              invoice_number: `INV-${Date.now()}`,
+              status: "unpaid",
+              total_amount: 0,
+              paid_amount: 0,
+              balance: 0
+            })
+            .select()
+            .single()
+
+          if (invoiceError) {
+            console.error("Invoice creation error (non-blocking):", invoiceError)
+          } else {
+            invoice = newInvoice
+          }
+        }
+
+        // Add items for each lab test (if we have invoice)
+        if (invoice && clean.length > 0) {
+          // Estimate price as 500 per test (since we don't have test details)
+          const estimatedPrice = 500
+
+          for (const testName of clean) {
+            await supabase.from("invoice_items").insert({
+              invoice_id: invoice.id,
+              item_type: "lab_test",
+              item_id: testName,
+              description: testName,
+              quantity: 1,
+              unit_price: estimatedPrice,
+              total_price: estimatedPrice
+            }).catch(err => console.error("Item insertion error (non-blocking):", err))
+          }
+
+          // Update invoice total
+          const { data: items } = await supabase
+            .from("invoice_items")
+            .select("total_price")
+            .eq("invoice_id", invoice.id)
+
+          const newTotal = (items || []).reduce((sum, item) => sum + (item.total_price || 0), 0)
+
+          await supabase
+            .from("invoices")
+            .update({
+              total_amount: newTotal,
+              balance: newTotal
+            })
+            .eq("id", invoice.id)
+            .catch(err => console.error("Invoice update error (non-blocking):", err))
+        }
+      } catch (billingError) {
+        console.error("Billing error (non-blocking):", billingError)
+        // Don't fail the operation if billing fails
+      }
+
+      alert("Sent to lab and added to billing")
+    } catch (err) {
+      console.error("Unexpected error:", err)
+      alert("Error: " + err.message)
+    }
   }
 
   const sendPrescription = async () => {

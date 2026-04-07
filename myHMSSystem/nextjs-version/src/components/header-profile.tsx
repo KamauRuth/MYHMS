@@ -29,7 +29,15 @@ export function HeaderProfile() {
   useEffect(() => {
     const loadUserProfile = async () => {
       try {
+        // Add timeout handler
+        const timeoutId = setTimeout(() => {
+          console.warn("Auth request timed out, skipping profile load")
+          setLoading(false)
+        }, 5000)
+
         const { data: userData, error: userError } = await supabase.auth.getUser()
+        clearTimeout(timeoutId)
+
         if (userError || !userData.user) {
           setLoading(false)
           return
@@ -56,7 +64,7 @@ export function HeaderProfile() {
     }
 
     loadUserProfile()
-  }, [supabase])
+  }, [])
 
   const handleLogout = async () => {
     await supabase.auth.signOut()

@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
+import { generateBillingForOPDAction } from "@/app/actions/billingActions"
 
 
 const supabase = createClient()
@@ -87,6 +88,9 @@ export default function OPDVisit() {
   const [urgency, setUrgency] = useState("ELECTIVE")
   const [preferredDate, setPreferredDate] = useState("")
   const [estimatedDuration, setEstimatedDuration] = useState("")
+
+  // BILLING
+  const [consultationFee, setConsultationFee] = useState(500)
 
 
 
@@ -507,7 +511,8 @@ const handleDiagnosisKeyDown = (e: any) => {
         visit_id: visit.id,
         test_id: test.id,
         lab_amount: test.price,
-        department_id: userDepartmentId || null
+        department_id: userDepartmentId || null,
+        status: "pending"
       })
       .select()
       .single();
@@ -544,6 +549,30 @@ const handleDiagnosisKeyDown = (e: any) => {
         details: itemError.details,
         invoiceId: invoice.id,
         testId: test.id
+      });
+      continue;
+    }
+
+    // 7️⃣ Update invoice total and balance
+    const { data: items } = await supabase
+      .from("invoice_items")
+      .select("total_price")
+      .eq("invoice_id", invoice.id);
+
+    const newTotal = (items || []).reduce((sum, item) => sum + (item.total_price || 0), 0);
+
+    const { error: updateError } = await supabase
+      .from("invoices")
+      .update({
+        total_amount: newTotal,
+        balance: newTotal
+      })
+      .eq("id", invoice.id);
+
+    if (updateError) {
+      console.error("Invoice update error:", {
+        message: updateError.message,
+        invoiceId: invoice.id
       });
       continue;
     }
@@ -624,7 +653,7 @@ const handleDiagnosisKeyDown = (e: any) => {
 
     // 3️⃣ Success - Reset form and notify
     alert(`✅ Prescription sent to pharmacy!\nRx #: ${prescriptionNumber}`)
-    setDrugs([{ drug_id: "", quantity: "", frequency: "", route: "" }])
+    setDrugs([{ drug_id: "", quantity: "", frequency: "", route: "", specialInstructions: "" }])
     
   } catch (err: any) {
     console.error("Error in sendPrescription:", err)
@@ -635,18 +664,31 @@ const handleDiagnosisKeyDown = (e: any) => {
     if (!selectedICD) return alert("Diagnosis required before closing consultation")
     setClosing(true)
 
-    await supabase
-      .from("consultations")
-      .update({ status: "CLOSED", closed_at: new Date().toISOString() })
-      .eq("visit_id", visitId)
+    try {
+      // Silently create invoice in background
+      await generateBillingForOPDAction(visitId, consultationFee)
 
-    await supabase
-      .from("visits")
-      .update({ status: "COMPLETED" })
-      .eq("id", visitId)
+      const { error: consultError } = await supabase
+        .from("consultations")
+        .update({ status: "CLOSED", closed_at: new Date().toISOString() })
+        .eq("visit_id", visitId)
 
-    alert("Consultation closed")
-    router.push("/opd")
+      if (consultError) throw consultError
+
+      const { error: visitError } = await supabase
+        .from("visits")
+        .update({ status: "COMPLETED" })
+        .eq("id", visitId)
+
+      if (visitError) throw visitError
+
+      alert("✅ Consultation closed successfully")
+      router.push("/opd")
+    } catch (error: any) {
+      console.error("[ERROR]", error)
+      alert("Error: " + (error.message || "Failed to close consultation"))
+      setClosing(false)
+    }
   }
 
   const admitToIPD = async () => {
@@ -680,21 +722,97 @@ const handleDiagnosisKeyDown = (e: any) => {
       return
     }
 
-    const { error } = await supabase.from("theatre_bookings").insert({
-      booking_id: generateBookingId(),
-      patient_id: patient.id,
-      visit_id: visitId,
-      source: "OPD",
-      procedure_name: procedure,
-      urgency,
-      preferred_date: preferredDate,
-      estimated_duration_minutes: parseInt(estimatedDuration) || 0,
-      status: "BOOKED",
-    })
+    try {
+      // Get theatre procedure cost from database
+      const { data: procedureData } = await supabase
+        .from("theatre_procedures")
+        .select("cost")
+        .eq("name", procedure)
+        .maybeSingle()
 
-    if (error) return alert("Failed to book surgery")
-    alert("Surgery booked successfully")
-    setShowBooking(false)
+      const procedureCost = procedureData?.cost || 5000 // Default theatre cost: 5000 KES
+
+      // 1️⃣ Create theatre booking
+      const { data: booking, error } = await supabase.from("theatre_bookings").insert({
+        booking_id: generateBookingId(),
+        patient_id: patient.id,
+        visit_id: visitId,
+        source: "OPD",
+        procedure_name: procedure,
+        urgency,
+        preferred_date: preferredDate,
+        estimated_duration_minutes: parseInt(estimatedDuration) || 0,
+        status: "BOOKED",
+      }).select().single()
+
+      if (error) return alert("Failed to book surgery")
+
+      // 2️⃣ Silently add theatre charge to billing
+      try {
+        let { data: invoice } = await supabase
+          .from("invoices")
+          .select("*")
+          .eq("visit_id", visitId)
+          .maybeSingle()
+
+        // Create invoice if it doesn't exist
+        if (!invoice) {
+          const { data: newInvoice } = await supabase
+            .from("invoices")
+            .insert({
+              visit_id: visitId,
+              patient_id: patient.id,
+              invoice_number: `INV-${Date.now()}`,
+              status: "unpaid",
+              total_amount: procedureCost,
+              paid_amount: 0,
+              balance: procedureCost
+            })
+            .select()
+            .single()
+
+          invoice = newInvoice
+        }
+
+        // Add theatre item to invoice
+        if (invoice) {
+          await supabase.from("invoice_items").insert({
+            invoice_id: invoice.id,
+            item_type: "theatre_procedure",
+            item_id: booking.id,
+            description: `Theatre: ${procedure}`,
+            quantity: 1,
+            unit_price: procedureCost,
+            total_price: procedureCost
+          })
+
+          // Update invoice total
+          const { data: items } = await supabase
+            .from("invoice_items")
+            .select("total_price")
+            .eq("invoice_id", invoice.id)
+
+          const newTotal = (items || []).reduce((sum, item) => sum + item.total_price, 0)
+
+          await supabase
+            .from("invoices")
+            .update({
+              total_amount: newTotal,
+              balance: newTotal
+            })
+            .eq("id", invoice.id)
+        }
+      } catch (billingError) {
+        console.error("Theatre billing error (non-blocking):", billingError)
+        // Don't fail the booking if billing fails
+      }
+
+      alert("Surgery booked successfully")
+      setShowBooking(false)
+    } catch (err: any) {
+      console.error("Booking error:", err)
+      alert("Failed to book surgery")
+    }
   }
 
   if (loading) return <div>Loading…</div>
@@ -911,7 +1029,7 @@ const handleDiagnosisKeyDown = (e: any) => {
           value={d.quantity || ""}
           onChange={e => {
             const c = [...drugs]
-            c[i].quantity = parseInt(e.target.value) || ""
+            c[i].quantity = e.target.value
             setDrugs(c)
           }}
         />
@@ -979,7 +1097,7 @@ const handleDiagnosisKeyDown = (e: any) => {
         className="bg-red-100 text-red-600 px-3 py-2 rounded-lg hover:bg-red-200 text-sm"
         onClick={() => {
           const c = drugs.filter((_, idx) => idx !== i)
-          setDrugs(c.length ? c : [{ drug_id: "", quantity: "", frequency: "", route: "oral" }])
+          setDrugs(c.length ? c : [{ drug_id: "", quantity: "", frequency: "", route: "oral", specialInstructions: "" }])
         }}
       >
         Remove
@@ -994,7 +1112,7 @@ const handleDiagnosisKeyDown = (e: any) => {
       onClick={() =>
         setDrugs([
           ...drugs,
-          { drug_id: "", name: "", quantity: 1, dose: "", frequency: "", price: 0 }
+          { drug_id: "", quantity: "", frequency: "", route: "oral", specialInstructions: "" }
         ])
       }
     >
@@ -1064,6 +1182,8 @@ const handleDiagnosisKeyDown = (e: any) => {
     </div>
   )}
 
+
+
   {/* FINAL ACTIONS */}
   <div className="flex flex-wrap gap-4 pt-6 border-t">
     <button
@@ -1092,7 +1212,7 @@ const handleDiagnosisKeyDown = (e: any) => {
       onClick={closeConsultation}
       disabled={closing}
     >
-      Close Consultation
+      {closing ? "Processing..." : "Close Consultation"}
     </button>
   </div>
 
