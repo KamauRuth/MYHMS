@@ -430,6 +430,12 @@ const handleDiagnosisKeyDown = (e: any) => {
       return;
     }
 
+    // ✅ ENSURE PATIENT DATA IS AVAILABLE
+    if (!visit.patient || !visit.patient.id) {
+      alert("Patient information is missing. Please reload the visit.");
+      return;
+    }
+
     const selectedTests = labs.filter(id => id);
     if (selectedTests.length === 0) {
       alert("Please select at least one lab test");
@@ -480,7 +486,7 @@ const handleDiagnosisKeyDown = (e: any) => {
         .from("invoices")
         .insert({
           visit_id: visit.id,
-          patient_id: visit.patient_id,
+          patient_id: visit.patient.id,
           invoice_number: `INV-${Date.now()}`,
           status: "unpaid",
           total_amount: 0,
@@ -496,12 +502,24 @@ const handleDiagnosisKeyDown = (e: any) => {
           details: invoiceError.details,
           hint: invoiceError.hint,
           visitId: visit.id,
-          patientId: visit.patient_id
+          patientId: visit.patient?.id
         });
         continue;
       }
 
       invoice = newInvoice;
+    } else if (!invoice.patient_id) {
+      // ✅ FIX: Update invoice if patient_id is missing
+      const { error: updatePatientError } = await supabase
+        .from("invoices")
+        .update({ patient_id: visit.patient.id })
+        .eq("id", invoice.id);
+
+      if (!updatePatientError) {
+        invoice.patient_id = visit.patient.id;
+      } else {
+        console.error("Failed to update patient_id on invoice:", updatePatientError);
+      }
     }
 
     // 5️⃣ Create lab request

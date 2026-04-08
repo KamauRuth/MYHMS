@@ -40,10 +40,13 @@ export default function PaidPatients() {
   async function load() {
     setLoading(true)
 
-    // Fetch paid invoices
+    // Fetch paid invoices with patient information
     const { data: invoiceData, error: invoiceError } = await supabase
       .from("invoices")
-      .select("*")
+      .select(`
+        *,
+        patients (id, first_name, last_name)
+      `)
       .eq("status", "paid")
       .order("created_at", { ascending: false })
 
@@ -53,9 +56,15 @@ export default function PaidPatients() {
       return
     }
 
-    // Fetch patient data for each invoice
+    // Patient data should already be included, but use as fallback if null
     const invoicesWithPatients = await Promise.all(
       (invoiceData || []).map(async (invoice: any) => {
+        // If patients relationship is already loaded, use it
+        if (invoice.patients) {
+          return invoice
+        }
+
+        // Fallback: fetch patient if not included
         if (!invoice.patient_id) {
           return { ...invoice, patients: null }
         }

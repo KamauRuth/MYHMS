@@ -4,8 +4,6 @@ import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 
-const supabase = createClient()
-
 interface AdminRouteProps {
   children: React.ReactNode
 }
@@ -14,10 +12,17 @@ export function AdminRoute({ children }: AdminRouteProps) {
   const router = useRouter()
   const [isAdmin, setIsAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
+  const supabase = createClient()
 
   useEffect(() => {
     const checkAdminAccess = async () => {
       try {
+        if (!supabase?.auth || typeof supabase.auth.getUser !== "function") {
+          console.error("Supabase auth client is not initialized")
+          router.push("/(auth)/sign-in")
+          return
+        }
+
         const { data: userData, error: userError } = await supabase.auth.getUser()
         if (userError || !userData.user) {
           router.push("/(auth)/sign-in")
@@ -52,7 +57,7 @@ export function AdminRoute({ children }: AdminRouteProps) {
     }
 
     checkAdminAccess()
-  }, [router])
+  }, [router, supabase])
 
   if (loading) {
     return (

@@ -53,7 +53,7 @@ export default function AdminDashboard() {
         {
           name: 'Create Test Users',
           description: 'Create bulk test users',
-          href: '/admin/bulk-create-users',
+          href: '/admin/create-users',
           icon: '🔧'
         }
       ]

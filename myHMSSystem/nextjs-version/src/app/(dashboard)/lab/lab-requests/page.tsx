@@ -19,6 +19,7 @@ interface LabTest {
 
 interface LabRequest {
   id: string
+  created_at: string
   visits: {
     patient: Patient
   }
@@ -172,7 +173,10 @@ export default function LabRequests() {
             .select("total_price")
             .eq("invoice_id", existingInvoice.id)
 
-          const newTotal = (items || []).reduce((sum, item) => sum + (item.total_price || 0), 0)
+          const newTotal = (items || []).reduce(
+            (sum: number, item: { total_price: number | null }) => sum + (item.total_price || 0),
+            0
+          )
 
           await supabase
             .from("invoices")
@@ -341,13 +345,13 @@ export default function LabRequests() {
                           ))}
                         </select>
                         <button
-                          onClick={() => window.location.href = `/samples?requestId=${request.id}`}
+                          onClick={() => window.location.href = `/lab/samples?requestId=${request.id}`}
                           className="bg-blue-600 text-white px-3 py-1 rounded text-sm hover:bg-blue-700"
                         >
                           Sample
                         </button>
                         <button
-                          onClick={() => window.location.href = `/results?requestId=${request.id}`}
+                          onClick={() => window.location.href = `/lab/results?requestId=${request.id}`}
                           className="bg-green-600 text-white px-3 py-1 rounded text-sm hover:bg-green-700"
                         >
                           Results

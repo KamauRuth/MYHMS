@@ -33,6 +33,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
 import { title } from "node:process"
+import { Item } from "@radix-ui/react-select"
 
 const data = {
   user: {
@@ -76,6 +77,22 @@ const data = {
           url: "/landing",
           target: "_blank",
           icon: LayoutTemplate,
+        },
+
+        {
+          title: "Admin",
+          url: "/admin",
+          icon: LayoutPanelLeft,
+          Items: [
+            {
+              title:"Admin Dashboard",
+              url:"/admin/dashboard"
+            },
+            {
+              title:"User Management",
+              url:"/admin/create-users"
+            },
+          ]
         },
         {
           title: "Reception",
@@ -411,6 +428,19 @@ const data = {
             },
           ],
         },
+
+        {
+          title: "User Administration",
+          url: "#",
+          icon: Users,
+          items: [
+            {
+              title: "Admin",
+              url: "/users/admin",
+            },
+          ]
+        }, 
+      
         {
           title: "Settings",
           url: "#",
@@ -442,6 +472,8 @@ const data = {
             },
           ],
         },
+
+  
         {
           title: "FAQs",
           url: "/faqs",

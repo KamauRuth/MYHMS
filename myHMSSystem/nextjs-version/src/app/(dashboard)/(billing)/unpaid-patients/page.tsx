@@ -22,10 +22,13 @@ export default function Billing() {
     setError(null)
 
     try {
-      // First, get all unpaid invoices
+      // First, get all unpaid invoices with patient information
       const { data: invoiceData, error: invoiceError } = await supabase
         .from("invoices")
-        .select("*")
+        .select(`
+          *,
+          patients (id, first_name, last_name)
+        `)
         .eq("status", "unpaid")
 
       if (invoiceError) {
@@ -37,9 +40,15 @@ export default function Billing() {
 
       console.log("Raw invoices:", invoiceData)
 
-      // Now fetch patient data for each invoice
+      // Patient data should already be included, but use as fallback if null
       const invoicesWithPatients = await Promise.all(
         (invoiceData || []).map(async (invoice: any) => {
+          // If patients relationship is already loaded, use it
+          if (invoice.patients) {
+            return invoice
+          }
+
+          // Fallback: fetch patient if not included
           if (!invoice.patient_id) {
             return { ...invoice, patients: null }
           }
@@ -62,7 +71,7 @@ export default function Billing() {
 
       // Calculate unpaid total safely
       const unpaidTotal = (invoicesWithPatients || []).reduce(
-        (sum, inv) => sum + (inv.balance || 0),
+        (sum: number, inv) => sum + (inv.balance || 0),
         0
       )
 
@@ -79,8 +88,8 @@ export default function Billing() {
         console.error("Payment fetch error:", paymentError)
       } else {
         const todayTotal = (todayPayments || [])
-          .filter(p => p.created_at?.startsWith(today))
-          .reduce((sum, p) => sum + (p.amount_paid || 0), 0)
+          .filter((p: any) => p.created_at?.startsWith(today))
+          .reduce((sum: number, p: any) => sum + (p.amount_paid || 0), 0)
 
         setTotalToday(todayTotal)
       }

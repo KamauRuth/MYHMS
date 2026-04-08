@@ -122,31 +122,33 @@ export default function LabSamples() {
                 <div>
                   <strong>Status:</strong>
                   <select
-                    value={sample.status}
-                    onChange={(e) => updateSample(sample.id, { status: e.target.value })}
+                    value={sample.sample_status}
+                    onChange={(e) => updateSample(sample.id, { sample_status: e.target.value })}
                     className="ml-2 border rounded px-2 py-1"
                   >
                     <option value="collected">Collected</option>
+                    <option value="received">Received</option>
                     <option value="rejected">Rejected</option>
-                    <option value="processed">Processed</option>
+                    <option value="processing">Processing</option>
+                    <option value="damaged">Damaged</option>
                   </select>
                 </div>
                 <div>
-                  <strong>Collected:</strong> {sample.collected_at ? new Date(sample.collected_at).toLocaleString() : "Not set"}
+                  <strong>Collected:</strong> {sample.collection_time ? new Date(sample.collection_time).toLocaleString() : "Not set"}
                 </div>
                 <div>
                   <strong>Collected By:</strong> {sample.collected_by || "Unknown"}
                 </div>
               </div>
-              {sample.status === "rejected" && (
+              {sample.sample_status === "rejected" && (
                 <div className="mt-2">
-                  <strong>Rejection Reason:</strong>
+                  <strong>Notes:</strong>
                   <input
                     type="text"
-                    value={sample.rejection_reason || ""}
-                    onChange={(e) => updateSample(sample.id, { rejection_reason: e.target.value })}
+                    value={sample.notes || ""}
+                    onChange={(e) => updateSample(sample.id, { notes: e.target.value })}
                     className="ml-2 border rounded px-2 py-1 w-full"
-                    placeholder="Reason for rejection"
+                    placeholder="Reason for rejection or damage"
                   />
                 </div>
               )}
@@ -162,9 +164,9 @@ export default function LabSamples() {
               const formData = new FormData(e.target as HTMLFormElement)
               addSample({
                 sample_type: formData.get("sample_type"),
-                collected_at: new Date().toISOString(),
+                collection_time: new Date().toISOString(),
                 collected_by: user?.id,
-                storage_status: "collected"
+                sample_status: "collected"
               })
               ;(e.target as HTMLFormElement).reset()
             }}

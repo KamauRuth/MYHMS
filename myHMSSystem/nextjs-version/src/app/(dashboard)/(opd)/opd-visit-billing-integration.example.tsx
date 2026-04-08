@@ -295,19 +295,21 @@ export default function OPDVisit() {
       {/* Existing consultation form */}
       
       {/* NEW: Add billing section at bottom */}
-      <BillingCheckoutSection 
-        invoice={billing.invoice}
-        error={billing.error}
-        loading={closing}
-        onRedirect={() => {
-          if (billing.invoice.balance <= 0) {
-            router.push("/opd")
-          }
-        }}
-      />
+      {billing && (
+        <BillingCheckoutSection 
+          invoice={billing.invoice}
+          error={billing.error}
+          loading={closing}
+          onRedirect={() => {
+            if (billing.invoice?.balance <= 0) {
+              router.push("/opd")
+            }
+          }}
+        />
+      )}
 
       {/* Close button */}
-      {!billing.invoice && (
+      {!billing?.invoice && (
         <button 
           onClick={closeConsultation}
           disabled={closing}
@@ -319,7 +321,6 @@ export default function OPDVisit() {
     </div>
   )
 }
-*/
 
 /**
  * STEP 6: Add these imports to your page
