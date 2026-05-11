@@ -293,15 +293,20 @@ useEffect(() => {
 
   const timer = setTimeout(async () => {
     try {
+      console.log("🔍 Searching ICD-11 for:", diagnosis)
       const res = await fetch(`/api/icd11/suggest?q=${encodeURIComponent(diagnosis)}`)
 
-      if (!res.ok) return
+      if (!res.ok) {
+        console.error("❌ ICD API error:", res.status, res.statusText)
+        return
+      }
 
       const data = await res.json()
+      console.log("✅ ICD-11 results:", data)
       setIcdResults(Array.isArray(data) ? data.slice(0, 8) : [])
 
     } catch (err) {
-      console.error("ICD fetch error", err)
+      console.error("❌ ICD fetch error", err)
     }
   }, 400)
 
@@ -835,6 +840,15 @@ const handleDiagnosisKeyDown = (e: any) => {
 
   if (loading) return <div>Loading…</div>
 
+  const triageBloodPressure = triage?.bp_systolic && triage?.bp_diastolic
+    ? `${triage.bp_systolic}/${triage.bp_diastolic}`
+    : triage?.blood_pressure || "N/A"
+
+  const triageTemp = triage?.temperature ?? "N/A"
+  const triagePulse = triage?.pulse ?? "N/A"
+  const triageSpo2 = triage?.spo2 ?? "N/A"
+  const triageWeight = triage?.weight ?? "N/A"
+
   return (
     <div className="max-w-5xl mx-auto bg-white shadow-xl rounded-2xl p-8 space-y-8">
 
@@ -846,8 +860,7 @@ const handleDiagnosisKeyDown = (e: any) => {
 
     {triage && (
       <div className="mt-2 text-sm text-gray-600 bg-blue-50 p-3 rounded-lg">
-        Temp {triage.temperature}°C • Pulse {triage.pulse} •
-        BP {triage.bp_systolic}/{triage.bp_diastolic} • SpO₂ {triage.spo2}%
+        Temp {triageTemp}°C • Pulse {triagePulse} • BP {triageBloodPressure} • SpO₂ {triageSpo2}% • Weight {triageWeight} kg
       </div>
     )}
   </div>

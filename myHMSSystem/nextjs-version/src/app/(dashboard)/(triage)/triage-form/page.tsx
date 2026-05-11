@@ -31,9 +31,8 @@ const classifyBP = (sys: number, dia: number) => {
   return "NORMAL"
 }
 
-const classifyBMI = (weight: number, height: number) => {
-  if (!weight || !height) return null
-  const bmi = weight / (height * height)
+const classifyBMI = (bmi: number | null) => {
+  if (!bmi || bmi <= 0) return null
   if (bmi < 18.5) return "UNDERWEIGHT"
   if (bmi < 25) return "NORMAL"
   if (bmi < 30) return "OVERWEIGHT"
@@ -109,11 +108,14 @@ export default function TriageForm() {
 
     const height = Number(form.height)
     const weight = Number(form.weight)
+    const heightInMeters = height > 3 ? height / 100 : height
 
     const bmi =
-      height && weight ? weight / (height * height) : null
+      heightInMeters > 0 && weight > 0
+        ? weight / (heightInMeters * heightInMeters)
+        : null
 
-    const bmiClass = classifyBMI(bmi || 0)
+    const bmiClass = classifyBMI(bmi)
 
     const overall = deriveOverallSeverity(
       [temp, pulse, bp].filter(Boolean)
@@ -180,11 +182,7 @@ export default function TriageForm() {
 
   alert(`Triage complete → Sent to ${clinic}`)
 
-  router.push(
-    clinic === "DENTAL"
-      ? "/dental-queue"
-      : "/opd-queue"
-  )
+  router.push("/triage-queue")
 }
 
   if (!visit) return <p className="p-6">Loading...</p>

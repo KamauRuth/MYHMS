@@ -15,7 +15,9 @@ const generateVisitNo = () => {
 export default function ViewPatients() {
 
   const [patients, setPatients] = useState<any[]>([])
+  const [todayVisits, setTodayVisits] = useState<any[]>([])
   const [loadingId, setLoadingId] = useState<string | null>(null)
+  const [createdVisitPatientIds, setCreatedVisitPatientIds] = useState<string[]>([])
 
   const [isDialogOpen, setIsDialogOpen] = useState(false)
 
@@ -29,12 +31,42 @@ export default function ViewPatients() {
 
   useEffect(() => {
     fetchPatients()
+    fetchTodaysVisits()
     fetchServices()
   }, [])
 
   async function fetchPatients() {
     const { data } = await supabase.from("patients").select("*")
     setPatients(data || [])
+  }
+
+  async function fetchTodaysVisits() {
+    const startOfDay = new Date()
+    startOfDay.setHours(0, 0, 0, 0)
+
+    const endOfDay = new Date(startOfDay)
+    endOfDay.setDate(endOfDay.getDate() + 1)
+
+    const { data } = await supabase
+      .from("visits")
+      .select(`
+        id,
+        visit_no,
+        clinic,
+        status,
+        created_at,
+        patient_id,
+        patients(first_name, last_name)
+      `)
+      .gte("created_at", startOfDay.toISOString())
+      .lt("created_at", endOfDay.toISOString())
+      .order("created_at", { ascending: false })
+
+    const visits = data || []
+    setTodayVisits(visits)
+    setCreatedVisitPatientIds(
+      visits.map((visit: any) => visit.patient_id).filter(Boolean)
+    )
   }
 
   async function fetchServices() {
@@ -126,7 +158,7 @@ export default function ViewPatients() {
       alert(`Visit created → Sent to TRIAGE (${clinic})`)
 
       setIsDialogOpen(false)
-      fetchPatients()
+      await Promise.all([fetchPatients(), fetchTodaysVisits()])
 
     } catch (err: any) {
       console.error(err)
@@ -141,6 +173,43 @@ export default function ViewPatients() {
 
       <h1 className="text-2xl font-bold mb-4">Patients</h1>
 
+      <div className="mb-6 rounded border bg-white p-4">
+        <div className="flex items-center justify-between gap-4 mb-3">
+          <h2 className="text-lg font-semibold">Today&apos;s Created Visits</h2>
+          <span className="text-sm text-gray-500">{todayVisits.length} visit{todayVisits.length === 1 ? "" : "s"}</span>
+        </div>
+
+        {todayVisits.length === 0 ? (
+          <p className="text-sm text-gray-500">No visits have been created today.</p>
+        ) : (
+          <div className="space-y-3">
+            {todayVisits.map((visit) => (
+              <div key={visit.id} className="flex flex-col gap-1 rounded border p-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="font-medium">
+                    {visit.patients?.first_name} {visit.patients?.last_name}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    {visit.visit_no} • {visit.clinic}
+                  </p>
+                </div>
+                <div className="flex flex-col items-start gap-1 md:items-end">
+                  <span className="rounded-full bg-green-100 px-3 py-1 text-xs font-semibold text-green-700">
+                    Visit Created
+                  </span>
+                  <span className="text-xs text-gray-500">
+                    {new Date(visit.created_at).toLocaleTimeString([], {
+                      hour: "numeric",
+                      minute: "2-digit"
+                    })}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       {patients.map((patient) => (
         <div
           key={patient.id}
@@ -152,9 +221,10 @@ export default function ViewPatients() {
 
           <button
             onClick={() => openVisitDialog(patient)}
-            className="bg-blue-600 text-white px-4 py-2 rounded"
+            disabled={createdVisitPatientIds.includes(patient.id)}
+            className="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50"
           >
-            Create Visit
+            {createdVisitPatientIds.includes(patient.id) ? "Visit Created" : "Create Visit"}
           </button>
         </div>
       ))}
