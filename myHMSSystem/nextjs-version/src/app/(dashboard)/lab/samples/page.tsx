@@ -14,6 +14,7 @@ export default function LabSamples() {
   const [loading, setLoading] = useState(true)
   const [request, setRequest] = useState<any>(null)
   const [user, setUser] = useState<any>(null)
+  const [staffId, setStaffId] = useState<string | null>(null)
 
   useEffect(() => {
     if (requestId) {
@@ -29,6 +30,20 @@ export default function LabSamples() {
       console.error("Failed to load user", error)
     } else {
       setUser(data.user)
+
+      if (data.user?.id) {
+        const { data: staff, error: staffError } = await supabase
+          .from("staff")
+          .select("id")
+          .eq("user_id", data.user.id)
+          .maybeSingle()
+
+        if (staffError) {
+          console.error("Failed to load staff record", staffError)
+        } else {
+          setStaffId(staff?.id || null)
+        }
+      }
     }
   }
 
@@ -69,12 +84,18 @@ export default function LabSamples() {
   }
 
   const addSample = async (sample: any) => {
+    const payload = {
+      ...sample,
+      request_id: requestId,
+      collected_by: staffId || null,
+    }
+
     const { error } = await supabase
       .from("lab_samples")
-      .insert([{ ...sample, request_id: requestId }])
+      .insert([payload])
 
     if (error) {
-      console.error("Failed to add sample", error)
+      console.error("Failed to add sample", error.message || error)
       alert("Could not add sample")
     } else {
       loadSamples()
@@ -134,7 +155,7 @@ export default function LabSamples() {
                   </select>
                 </div>
                 <div>
-                  <strong>Collected:</strong> {sample.collection_time ? new Date(sample.collection_time).toLocaleString() : "Not set"}
+                  <strong>Collected:</strong> {(sample.collection_time || sample.collected_at) ? new Date(sample.collection_time || sample.collected_at).toLocaleString() : "Not set"}
                 </div>
                 <div>
                   <strong>Collected By:</strong> {sample.collected_by || "Unknown"}
@@ -164,8 +185,6 @@ export default function LabSamples() {
               const formData = new FormData(e.target as HTMLFormElement)
               addSample({
                 sample_type: formData.get("sample_type"),
-                collection_time: new Date().toISOString(),
-                collected_by: user?.id,
                 sample_status: "collected"
               })
               ;(e.target as HTMLFormElement).reset()

@@ -31,6 +31,48 @@ const ICD_LAB_MAP: Record<string, string[]> = {
   cholera: ["Stool culture", "Electrolytes"],
 }
 
+const localDiagnosisFallback = (query: string) => {
+  const q = query.trim().toLowerCase()
+  if (!q) return []
+
+  return Object.keys(ICD_LAB_MAP)
+    .filter((key) => key.includes(q))
+    .slice(0, 8)
+    .map((key) => ({
+      code: `LOCAL-${key.toUpperCase()}`,
+      title: key.charAt(0).toUpperCase() + key.slice(1),
+    }))
+}
+
+const parseResultRows = (value: any) => {
+  if (!value) return []
+  if (Array.isArray(value)) return value
+
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) return "—"
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+}
+
+const getLatestLabResult = (labRequest: any) => {
+  const items = Array.isArray(labRequest?.lab_results) ? labRequest.lab_results : []
+  if (items.length === 0) return null
+
+  return [...items].sort((a, b) => {
+    const aTime = new Date(a.released_at || a.verified_at || a.entered_at || a.created_at || 0).getTime()
+    const bTime = new Date(b.released_at || b.verified_at || b.entered_at || b.created_at || 0).getTime()
+    return bTime - aTime
+  })[0]
+}
+
 export default function OPDVisit() {
     const searchParams = useSearchParams()
     const visitId = searchParams.get("visitId")
@@ -282,6 +324,59 @@ useEffect(() => {
   load()
 
 }, [visitId])
+
+  useEffect(() => {
+    if (!visitId) return
+
+    const loadLabRequests = async () => {
+      const { data, error } = await supabase
+        .from("lab_requests")
+        .select(`
+          id,
+          visit_id,
+          test_id,
+          status,
+          notes,
+          created_at,
+          lab_test_master (
+            id,
+            test_name
+          ),
+          lab_results (
+            id,
+            status,
+            results,
+            comments,
+            entered_at,
+            verified_at,
+            released_at,
+            created_at
+          )
+        `)
+        .eq("visit_id", visitId)
+        .order("created_at", { ascending: false })
+
+      if (error) {
+        console.error("Failed to load lab requests:", error)
+        return
+      }
+
+      const requests = data || []
+      setLabRequests(requests)
+
+      const waitingForReview = requests.some((request: any) => {
+        const latestResult = getLatestLabResult(request)
+        if (!latestResult) return true
+
+        const status = String(latestResult.status || "").toLowerCase()
+        return !["released", "approved"].includes(status)
+      })
+
+      setHasPendingLabs(waitingForReview)
+    }
+
+    loadLabRequests()
+  }, [visitId])
   // =========================
   // ICD-11 SUGGESTIONS
   // =========================
@@ -291,26 +386,33 @@ useEffect(() => {
     return
   }
 
+  const controller = new AbortController()
+
   const timer = setTimeout(async () => {
     try {
-      console.log("🔍 Searching ICD-11 for:", diagnosis)
-      const res = await fetch(`/api/icd11/suggest?q=${encodeURIComponent(diagnosis)}`)
+      const res = await fetch(`/api/icd11/suggest?q=${encodeURIComponent(diagnosis)}`, {
+        signal: controller.signal,
+      })
 
       if (!res.ok) {
-        console.error("❌ ICD API error:", res.status, res.statusText)
+        setIcdResults(localDiagnosisFallback(diagnosis))
         return
       }
 
       const data = await res.json()
-      console.log("✅ ICD-11 results:", data)
       setIcdResults(Array.isArray(data) ? data.slice(0, 8) : [])
 
-    } catch (err) {
-      console.error("❌ ICD fetch error", err)
+    } catch (err: any) {
+      if (err?.name === "AbortError") return
+      setIcdResults(localDiagnosisFallback(diagnosis))
+      console.warn("ICD suggestion fetch failed; showing local suggestions")
     }
   }, 400)
 
-  return () => clearTimeout(timer)
+  return () => {
+    clearTimeout(timer)
+    controller.abort()
+  }
 
 }, [diagnosis, diagnosisLocked])
 
@@ -582,7 +684,10 @@ const handleDiagnosisKeyDown = (e: any) => {
       .select("total_price")
       .eq("invoice_id", invoice.id);
 
-    const newTotal = (items || []).reduce((sum, item) => sum + (item.total_price || 0), 0);
+    const newTotal = (items || []).reduce(
+      (sum: number, item: { total_price?: number | null }) => sum + (item.total_price || 0),
+      0
+    );
 
     const { error: updateError } = await supabase
       .from("invoices")
@@ -689,6 +794,11 @@ const handleDiagnosisKeyDown = (e: any) => {
 
     try {
       // Silently create invoice in background
+      if (!visitId) {
+        alert("Visit not found")
+        return
+      }
+
       await generateBillingForOPDAction(visitId, consultationFee)
 
       const { error: consultError } = await supabase
@@ -815,7 +925,10 @@ const handleDiagnosisKeyDown = (e: any) => {
             .select("total_price")
             .eq("invoice_id", invoice.id)
 
-          const newTotal = (items || []).reduce((sum, item) => sum + item.total_price, 0)
+          const newTotal = (items || []).reduce(
+            (sum: number, item: { total_price?: number | null }) => sum + (item.total_price || 0),
+            0
+          )
 
           await supabase
             .from("invoices")
@@ -861,6 +974,103 @@ const handleDiagnosisKeyDown = (e: any) => {
     {triage && (
       <div className="mt-2 text-sm text-gray-600 bg-blue-50 p-3 rounded-lg">
         Temp {triageTemp}°C • Pulse {triagePulse} • BP {triageBloodPressure} • SpO₂ {triageSpo2}% • Weight {triageWeight} kg
+      </div>
+    )}
+  </div>
+
+  {/* LAB RESULTS */}
+  <div className="space-y-4">
+    <div className="flex items-center justify-between gap-4 flex-wrap border-b pb-2">
+      <div>
+        <h3 className="text-xl font-semibold text-gray-800">Lab Results</h3>
+        <p className="text-sm text-gray-500">Results linked to this visit appear here automatically.</p>
+      </div>
+      <div className="text-sm px-3 py-1 rounded-full bg-slate-100 text-slate-700">
+        {labRequests.length} request{labRequests.length === 1 ? "" : "s"}
+      </div>
+    </div>
+
+    {labRequests.length === 0 ? (
+      <div className="rounded-xl border border-dashed border-gray-300 p-5 text-sm text-gray-500">
+        No lab requests have been created for this visit yet.
+      </div>
+    ) : (
+      <div className="grid gap-4">
+        {labRequests.map((request: any) => {
+          const latestResult = getLatestLabResult(request)
+          const rows = parseResultRows(latestResult?.results)
+          const status = String(latestResult?.status || request.status || "pending").toLowerCase()
+          const released = ["released", "approved"].includes(status)
+
+          return (
+            <div key={request.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-5 shadow-sm">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{request.lab_test_master?.test_name || "Lab Request"}</p>
+                  <h4 className="mt-1 text-lg font-semibold text-slate-900">Request {request.id}</h4>
+                  <p className="text-sm text-slate-600">Created: {formatDateTime(request.created_at)}</p>
+                </div>
+
+                <div className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${released ? "bg-emerald-100 text-emerald-700" : latestResult ? "bg-amber-100 text-amber-700" : "bg-slate-200 text-slate-700"}`}>
+                  {released ? "Released" : latestResult ? String(latestResult.status || "Awaiting review") : "Awaiting result"}
+                </div>
+              </div>
+
+              {latestResult ? (
+                <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                  <div className="border-b border-slate-200 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Result Summary</p>
+                      <p className="text-xs text-slate-500">Verified: {formatDateTime(latestResult.verified_at || latestResult.entered_at || latestResult.created_at)}</p>
+                    </div>
+                    <p className="text-xs text-slate-500">{latestResult.comments ? "Comments available" : "No comments"}</p>
+                  </div>
+
+                  {rows.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-sm">
+                        <thead className="bg-slate-100 text-slate-700">
+                          <tr>
+                            <th className="border-b border-slate-200 px-4 py-3 text-left font-semibold">Parameter</th>
+                            <th className="border-b border-slate-200 px-4 py-3 text-left font-semibold">Result</th>
+                            <th className="border-b border-slate-200 px-4 py-3 text-left font-semibold">Range</th>
+                            <th className="border-b border-slate-200 px-4 py-3 text-left font-semibold">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((row: any, index: number) => (
+                            <tr key={`${request.id}-${index}`} className={index % 2 === 0 ? "bg-white" : "bg-slate-50/70"}>
+                              <td className="border-b border-slate-200 px-4 py-3 font-medium">{row.parameter}</td>
+                              <td className="border-b border-slate-200 px-4 py-3">{row.result}{row.units ? ` ${row.units}` : ""}</td>
+                              <td className="border-b border-slate-200 px-4 py-3 text-slate-600">{row.reference_range || "—"}</td>
+                              <td className="border-b border-slate-200 px-4 py-3">
+                                <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${row.abnormal ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
+                                  {row.abnormal ? "Abnormal" : "Normal"}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="p-4 text-sm text-slate-500">The result has been saved, but no parameter rows were returned.</div>
+                  )}
+
+                  {latestResult.comments && (
+                    <div className="border-t border-slate-200 px-4 py-3 text-sm text-slate-700">
+                      <strong>Comments:</strong> {latestResult.comments}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
+                  No result has been entered for this request yet.
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
     )}
   </div>
