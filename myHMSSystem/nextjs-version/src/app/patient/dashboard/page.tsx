@@ -281,7 +281,7 @@ export default function PatientDashboard() {
     popup.document.write(buildPrintableReport(result))
     popup.document.close()
     popup.focus()
-    popup.onload = () => popup.print()
+    window.setTimeout(() => { if (!popup.closed) popup.print() }, 300)
   }
 
   if (loading) return <div className="min-h-screen bg-gray-50 flex items-center justify-center">Loading...</div>

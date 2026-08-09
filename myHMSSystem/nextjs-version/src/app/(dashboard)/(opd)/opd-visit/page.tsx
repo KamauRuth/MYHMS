@@ -828,8 +828,60 @@ const handleDiagnosisKeyDown = (e: any) => {
       return alert(`Failed to add prescription items: ${itemsError.message}`)
     }
 
+    const drugIds = clean.map((item) => item.drug_id)
+    const { data: priceRows, error: priceError } = await supabase
+      .from("drug_batches")
+      .select("drug_id,selling_price,expiry_date")
+      .in("drug_id", drugIds)
+      .gt("quantity_in_stock", 0)
+      .order("expiry_date", { ascending: true })
+
+    if (priceError) {
+      alert(`Prescription created, but Pharmacy billing needs attention: ${priceError.message}`)
+      return
+    }
+
+    const pharmacyLines = clean.map((item) => {
+      const batch = (priceRows || []).find((row: any) => row.drug_id === item.drug_id)
+      const drug = allDrugs.find((entry: any) => entry.id === item.drug_id)
+      return {
+        item_type: "pharmacy_drug",
+        item_id: prescriptionData.id,
+        description: `${drug?.drug_name || "Medication"} · ${item.frequency || "As directed"}`,
+        quantity: Number(item.quantity),
+        unit_price: Number(batch?.selling_price || 0),
+        total_price: Number(item.quantity) * Number(batch?.selling_price || 0),
+      }
+    })
+
+    if (pharmacyLines.some((line) => line.unit_price <= 0)) {
+      alert("Prescription created, but one or more medicines have no active selling price. Pharmacy must price them before payment.")
+      return
+    }
+
+    const pharmacyTotal = pharmacyLines.reduce((sum, line) => sum + line.total_price, 0)
+    const { data: pharmacyInvoice, error: pharmacyInvoiceError } = await supabase
+      .from("invoices")
+      .insert({ patient_id: patient.id, visit_id: visit.id, invoice_number: `PHARM-${Date.now()}`, status: "unpaid", total_amount: pharmacyTotal, paid_amount: 0, balance: pharmacyTotal })
+      .select()
+      .single()
+
+    if (pharmacyInvoiceError || !pharmacyInvoice) {
+      alert(`Prescription created, but Pharmacy invoice failed: ${pharmacyInvoiceError?.message || "Unknown error"}`)
+      return
+    }
+
+    const { error: pharmacyItemsError } = await supabase.from("invoice_items").insert(
+      pharmacyLines.map((line) => ({ ...line, invoice_id: pharmacyInvoice.id }))
+    )
+
+    if (pharmacyItemsError) {
+      alert(`Prescription created, but Pharmacy invoice items failed: ${pharmacyItemsError.message}`)
+      return
+    }
+
     // 3️⃣ Success - Reset form and notify
-    alert(`✅ Prescription sent to pharmacy!\nRx #: ${prescriptionNumber}`)
+    alert(`Prescription sent to Pharmacy billing.\nRx #: ${prescriptionNumber}\nAmount: KES ${pharmacyTotal.toLocaleString()}`)
     setDrugs([{ drug_id: "", quantity: "", frequency: "", route: "", specialInstructions: "" }])
     
   } catch (err: any) {

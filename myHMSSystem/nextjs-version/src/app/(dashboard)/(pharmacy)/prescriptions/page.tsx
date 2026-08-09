@@ -161,6 +161,25 @@ export default function PrescriptionsPage() {
 	}
 
 	const handleDispense = (prescription: Prescription, item: PrescriptionItem) => {
+		verifyPaymentAndOpen(prescription, item)
+	}
+
+	const verifyPaymentAndOpen = async (prescription: Prescription, item: PrescriptionItem) => {
+		const { data: paidInvoice, error } = await supabase
+			.from('invoices')
+			.select('id,invoice_items!inner(item_id,item_type)')
+			.eq('patient_id', prescription.patient_id)
+			.eq('visit_id', prescription.visit_id)
+			.eq('status', 'paid')
+			.eq('invoice_items.item_type', 'pharmacy_drug')
+			.eq('invoice_items.item_id', prescription.id)
+			.limit(1)
+			.maybeSingle()
+
+		if (error || !paidInvoice) {
+			alert('Pharmacy payment is pending. Dispensing is allowed only after Finance approves payment and issues a receipt.')
+			return
+		}
 		setSelectedPrescription(prescription)
 		setSelectedItem(item)
 		setDispensingQty('')

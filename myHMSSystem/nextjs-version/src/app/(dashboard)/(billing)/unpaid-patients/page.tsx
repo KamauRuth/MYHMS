@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Banknote, ChevronDown, ChevronUp, CreditCard, ReceiptText, Search, UserRound } from "lucide-react"
+import { Banknote, ChevronDown, ChevronUp, ReceiptText, Search, UserRound } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 
 const supabase = createClient()
@@ -65,12 +65,9 @@ export default function ServicePaymentsPage() {
     const amount = Number(invoice.balance || 0)
     if (amount <= 0) return
     const method = methods[invoice.id] || "Cash"
-    const reference = method === "Cash" ? null : prompt(`Enter ${method} reference number`)
-    if (method !== "Cash" && !reference) return
-
     setProcessing(invoice.id)
     try {
-      const { data: payment, error: paymentError } = await supabase.from("payments").insert({ invoice_id: invoice.id, amount_paid: amount, payment_method: method, reference_number: reference, created_at: new Date().toISOString() }).select().single()
+      const { data: payment, error: paymentError } = await supabase.from("payments").insert({ invoice_id: invoice.id, amount_paid: amount, payment_method: method, created_at: new Date().toISOString() }).select().single()
       if (paymentError) throw paymentError
 
       const paidAmount = Number(invoice.paid_amount || 0) + amount
@@ -103,8 +100,10 @@ export default function ServicePaymentsPage() {
     const popup = window.open("", "_blank", "width=760,height=820")
     if (!popup) return alert(`Receipt ${receiptNumber} was generated, but the print window was blocked.`)
     const rows = (invoice.invoice_items || []).map((item: any) => `<tr><td>${item.description || item.item_type}</td><td>${Number(item.quantity || 1)}</td><td style="text-align:right">KES ${Number(item.total_price || 0).toLocaleString()}</td></tr>`).join("")
-    popup.document.write(`<!doctype html><html><head><title>${receiptNumber}</title><style>body{font-family:Arial;color:#172033;padding:40px}.head{text-align:center;border-bottom:2px solid #2563eb;padding-bottom:16px}.head h1{color:#2563eb;margin:0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:22px 0}.box{background:#f8fafc;border-radius:8px;padding:11px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border-bottom:1px solid #e2e8f0;text-align:left}.total{text-align:right;font-size:22px;font-weight:bold;margin-top:22px}.foot{text-align:center;color:#64748b;font-size:12px;margin-top:40px}</style></head><body><div class="head"><h1>LifePoint Hospital</h1><p>Official ${meta.label} Receipt</p></div><div class="grid"><div class="box"><b>Receipt</b><br>${receiptNumber}</div><div class="box"><b>Date</b><br>${new Date(payment.created_at).toLocaleString()}</div><div class="box"><b>Patient</b><br>${patientName}</div><div class="box"><b>Invoice</b><br>${invoice.invoice_number || invoice.id}</div><div class="box"><b>Payment method</b><br>${payment.payment_method}</div><div class="box"><b>Service stage</b><br>${meta.label}</div></div><table><thead><tr><th>Service</th><th>Qty</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows}</tbody></table><div class="total">Paid: KES ${Number(payment.amount_paid).toLocaleString()}</div><div class="foot">Payment received. Keep this receipt for your records.</div><script>window.onload=()=>window.print()</script></body></html>`)
+    popup.document.write(`<!doctype html><html><head><title>${receiptNumber}</title><style>body{font-family:Arial;color:#172033;padding:40px}.head{text-align:center;border-bottom:2px solid #2563eb;padding-bottom:16px}.head h1{color:#2563eb;margin:0}.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:22px 0}.box{background:#f8fafc;border-radius:8px;padding:11px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border-bottom:1px solid #e2e8f0;text-align:left}.total{text-align:right;font-size:22px;font-weight:bold;margin-top:22px}.foot{text-align:center;color:#64748b;font-size:12px;margin-top:40px}</style></head><body><div class="head"><h1>LifePoint Hospital</h1><p>Official ${meta.label} Receipt</p></div><div class="grid"><div class="box"><b>Receipt</b><br>${receiptNumber}</div><div class="box"><b>Date</b><br>${new Date(payment.created_at).toLocaleString()}</div><div class="box"><b>Patient</b><br>${patientName}</div><div class="box"><b>Invoice</b><br>${invoice.invoice_number || invoice.id}</div><div class="box"><b>Payment method</b><br>${payment.payment_method}</div><div class="box"><b>Service stage</b><br>${meta.label}</div></div><table><thead><tr><th>Service</th><th>Qty</th><th style="text-align:right">Amount</th></tr></thead><tbody>${rows}</tbody></table><div class="total">Paid: KES ${Number(payment.amount_paid).toLocaleString()}</div><div class="foot">Payment received. Keep this receipt for your records.</div></body></html>`)
     popup.document.close()
+    popup.focus()
+    window.setTimeout(() => { if (!popup.closed) popup.print() }, 300)
   }
 
   return <div className="mx-auto max-w-7xl space-y-6 p-6">

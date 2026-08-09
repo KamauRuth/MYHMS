@@ -310,7 +310,7 @@ export default function LabResults() {
     popup.document.write(html)
     popup.document.close()
     popup.focus()
-    popup.onload = () => popup.print()
+    window.setTimeout(() => { if (!popup.closed) popup.print() }, 300)
   }
 
   const saveResults = async () => {
