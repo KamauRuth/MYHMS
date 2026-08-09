@@ -7,6 +7,7 @@ const supabase = createClient()
 
 interface Invoice {
   id: string
+  invoice_number?: string
   total_amount: number
   balance: number
   status: string
@@ -16,10 +17,12 @@ interface Invoice {
     first_name: string
     last_name: string
   }
+  items?: Array<{ description?: string; item_type?: string }>
 }
 
 interface Payment {
   id: string
+  invoice_id: string
   amount_paid: number
   payment_method: string
   created_at: string
@@ -45,7 +48,8 @@ export default function PaidPatients() {
       .from("invoices")
       .select(`
         *,
-        patients (id, first_name, last_name)
+        patients (id, first_name, last_name),
+        items:invoice_items(description,item_type)
       `)
       .eq("status", "paid")
       .order("created_at", { ascending: false })
@@ -95,7 +99,7 @@ export default function PaidPatients() {
     // Fetch all payments to show payment history
     const { data: paymentData, error: paymentError } = await supabase
       .from("payments")
-      .select("id, amount_paid, payment_method, created_at")
+      .select("id, invoice_id, amount_paid, payment_method, created_at")
       .order("created_at", { ascending: false })
 
     if (paymentError) {
@@ -104,14 +108,16 @@ export default function PaidPatients() {
       return
     }
 
-    setPayments(paymentData || [])
+    // Cast fetched payments to typed array and store in state
+    const paymentsArr = (paymentData || []) as Payment[]
+    setPayments(paymentsArr)
 
     // Calculate payments today
     const today = new Date().toISOString().split("T")[0]
 
-    const todayTotal = (paymentData || [])
-      .filter(p => p.created_at?.startsWith(today))
-      .reduce((sum, p) => sum + (p.amount_paid || 0), 0)
+    const todayTotal = paymentsArr
+      .filter((p: Payment) => p.created_at?.startsWith(today))
+      .reduce((sum: number, p: Payment) => sum + (p.amount_paid || 0), 0)
 
     setTotalCollectedToday(todayTotal)
     setLoading(false)
@@ -126,6 +132,18 @@ export default function PaidPatients() {
         </div>
       </div>
     )
+  }
+
+  function printReceipt(invoice: Invoice, payment: Payment) {
+    const receiptNumber = `LPH-RCP-${payment.id.slice(0, 8).toUpperCase()}`
+    const patientName = invoice.patients
+      ? `${invoice.patients.first_name} ${invoice.patients.last_name}`
+      : "Patient"
+    const receiptWindow = window.open("", "_blank", "width=760,height=820")
+    if (!receiptWindow) return alert(`Receipt ${receiptNumber} is ready, but the print window was blocked.`)
+    const rows = (invoice.items || []).map((item) => `<tr><td>${item.description || item.item_type || "Hospital service"}</td></tr>`).join("")
+    receiptWindow.document.write(`<!doctype html><html><head><title>${receiptNumber}</title><style>body{font-family:Arial,sans-serif;color:#172033;padding:40px}.header{text-align:center;border-bottom:2px solid #2563eb;padding-bottom:18px}h1{margin:0;color:#2563eb}.meta{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:24px 0}.box{background:#f8fafc;padding:12px;border-radius:8px}table{width:100%;border-collapse:collapse;margin-top:18px}td{padding:10px;border-bottom:1px solid #e2e8f0}.total{font-size:22px;font-weight:bold;text-align:right;margin-top:24px}.footer{text-align:center;color:#64748b;margin-top:45px;font-size:12px}</style></head><body><div class="header"><h1>LifePoint Hospital</h1><p>Official Payment Receipt</p></div><div class="meta"><div class="box"><b>Receipt</b><br>${receiptNumber}</div><div class="box"><b>Date</b><br>${new Date(payment.created_at).toLocaleString()}</div><div class="box"><b>Patient</b><br>${patientName}</div><div class="box"><b>Invoice</b><br>${invoice.invoice_number || invoice.id}</div><div class="box"><b>Method</b><br>${payment.payment_method || "Cash"}</div><div class="box"><b>Status</b><br>PAID</div></div><table>${rows}</table><div class="total">Amount paid: KES ${Number(payment.amount_paid || 0).toLocaleString()}</div><div class="footer">This system-generated receipt confirms payment received by LifePoint Hospital.</div><script>window.onload=()=>window.print()</script></body></html>`)
+    receiptWindow.document.close()
   }
 
   return (
@@ -183,7 +201,9 @@ export default function PaidPatients() {
           </div>
         ) : (
           <div className="space-y-3">
-            {invoices.map(inv => (
+            {invoices.map(inv => {
+              const payment = payments.find((entry) => entry.invoice_id === inv.id)
+              return (
               <div
                 key={inv.id}
                 className="border border-green-200 rounded-xl p-5 bg-green-50 hover:shadow-lg transition-shadow"
@@ -232,8 +252,10 @@ export default function PaidPatients() {
                     </div>
                   </div>
                 </div>
+                {payment && <div className="mt-3 flex justify-end"><button onClick={() => printReceipt(inv, payment)} className="rounded-lg border border-green-600 bg-white px-4 py-2 text-sm font-semibold text-green-700 hover:bg-green-100">Print receipt</button></div>}
               </div>
-            ))}
+              )
+            })}
           </div>
         )}
       </div>

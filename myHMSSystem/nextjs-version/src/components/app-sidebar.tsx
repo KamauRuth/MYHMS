@@ -1,26 +1,26 @@
 "use client"
 
-import * as React from "react"
 import {
-  LayoutPanelLeft,
-  LayoutDashboard,
-  Mail,
-  CheckSquare,
-  MessageCircle,
-  Calendar,
-  Shield,
-  AlertTriangle,
-  Settings,
-  HelpCircle,
+  Activity,
+  Baby,
+  BedDouble,
+  CalendarDays,
+  ClipboardPlus,
   CreditCard,
-  LayoutTemplate,
-  Users,
+  FlaskConical,
+  HeartPulse,
+  LayoutDashboard,
+  Pill,
+  Scissors,
+  Settings,
+  ShieldCheck,
   Stethoscope,
+  UserRoundPlus,
+  Users,
 } from "lucide-react"
 import Link from "next/link"
-import { Logo } from "@/components/logo"
-import { SidebarNotification } from "@/components/sidebar-notification"
 
+import { Logo } from "@/components/logo"
 import { NavMain } from "@/components/nav-main"
 import { NavUser } from "@/components/nav-user"
 import {
@@ -32,477 +32,234 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { title } from "node:process"
-import { Item } from "@radix-ui/react-select"
+import type { CurrentStaff, StaffRole } from "@/lib/auth/roles"
 
-const data = {
-  user: {
-    name: "ShadcnStore",
-    email: "store@example.com",
-    avatar: "",
-  },
-  navGroups: [
-    {
-      label: "Dashboards",
-      items: [
-        {
-          title: "Dashboard",
-          url: "/dashboard",
-          icon: LayoutDashboard,
-        },
-  
-      ],
-    },
-    {
-      label: "Apps",
-      items: [
-    
-        {
-          title: "Calendar",
-          url: "/calendar",
-          icon: Calendar,
-        },
-        {
-          title: "Users",
-          url: "/users",
-          icon: Users,
-        },
-      ],
-    },
-    {
-      label: "Pages",
-      items: [
-        {
-          title: "Landing",
-          url: "/landing",
-          target: "_blank",
-          icon: LayoutTemplate,
-        },
-
-        {
-          title: "Admin",
-          url: "/admin",
-          icon: LayoutPanelLeft,
-          Items: [
-            {
-              title:"Admin Dashboard",
-              url:"/admin/dashboard"
-            },
-            {
-              title:"User Management",
-              url:"/admin/create-users"
-            },
-          ]
-        },
-        {
-          title: "Reception",
-          url: "#",
-          icon: Shield,
-          items: [
-            {
-              title: "Register Patients",
-              url: "/register-patient",
-            },
-            {
-              title: "View Patients",
-              url: "/view-patients",
-            },
-            
-          ],
-        },
-
-        {
-          title: "Billing",
-          url: "#",
-          icon: CheckSquare,
-          items: [
-            {
-              title: "Unpaid Patients",
-              url: "/unpaid-patients",
-            },
-            {
-              title:"paid patients",
-              url: "/paid-patients"
-            }
-
-            
-          ],
-
-        },
-
-        {
-          title:"Triage",
-          url:"#",
-          icon: MessageCircle,
-          items:[
-            {
-              title:"Triage Queue",
-              url:"/triage-queue"
-            },
-            {
-              title:"Triage Form",
-              url:"/triage-form"
-            }
-          ]
-        },
-
-        {
-          title:"OPD",
-          url:"#",
-          icon: Mail,
-          items:[
-            {
-              title:"OPD Queue",
-              url:"/opd-queue"
-            },
-            {
-              title:"OPD Visit",
-              url:"/opd-visit"
-            },
-            {
-              title:"Admit to IPD",
-              url:"/admit"
-            }
-          ] 
-        },
-        {
-          title:"Maternity",
-          url:"#",
-          icon: Calendar,
-          items:[
-            {
-              title:"Queue",
-              url:"/maternity-queue"
-            },
-            {
-              title:"New Case",
-              url:"/maternity-new"
-            },
-            {
-              title:"Record Delivery",
-              url:"/delivery-record"
-            }
-          ]
-        },
-        {
-          title:"Antenatal Clinic (ANC)",
-          url:"#",
-          icon: Calendar,
-          items:[
-            {
-              title:"ANC Queue",
-              url:"/anc-queue"
-            },
-            {
-              title:"New ANC Visit",
-              url:"/anc-new"
-            }
-          ]
-        },
-        {
-          title:"Postnatal Clinic",
-          url:"#",
-          icon: Calendar,
-          items:[
-            {
-              title:"Postnatal Queue",
-              url:"/postnatal-queue"
-            },
-            {
-              title:"New Postnatal Visit",
-              url:"/postnatal-new"
-            }
-          ]
-        },
-        {
-          title:"Laboratory",
-          url:"#",
-          icon: LayoutPanelLeft,
-          items:[
-         
-            {
-              title:"Test Master",
-              url:"/lab/lab-master"
-            },
-            {
-              title:"Test Requests",
-              url:"/lab/lab-requests"
-            },
-            {
-              title:"Sample Management",
-              url:"/lab/samples"
-            },
-            {
-              title:"Result Entry",
-              url:"/lab/results"
-            },
-            {
-              title:"Result Validation",
-              url:"/lab/validation"
-            },
-            {
-              title:"Result Delivery",
-              url:"/lab/delivery"
-            },
-            {
-              title:"Critical Alerts",
-              url:"/alerts"
-            },
-            {
-              title:"Quality Control",
-              url:"/qc"
-            },
-            {
-              title:"Billing Integration",
-              url:"/billing"
-            }
-          ]
-        },
-
-        {
-          title:"Pharmacy",
-          url:"#",
-          icon: LayoutPanelLeft,
-          items:[
-           
-            {
-              title:"Stock Management",
-              url:"/stock-management"
-            },
-            {
-              title:"Prescriptions",
-              url:"/prescriptions"
-            },
-            {
-              title:"Dispensing",
-              url:"/dispensing"
-            },
-            {
-              title:"Department Requests",
-              url:"/department-requests"
-            },
-            {
-              title:"Suppliers",
-              url:"/suppliers"
-            },
-            {
-              title:"Stock Levels",
-              url:"/stock-levels"
-            },
-            {
-              title:"Expiry Alerts",
-              url:"/expiry-alerts"
-            },
-            {
-              title:"Reports",
-              url:"/reports"
-            }
-          ]       
-
-
-        },
-
-   
-
-        {
-          title:"Theatre",
-          url:"#",
-          icon: Stethoscope,
-          items:[
-            {
-              title:"Dashboard",
-              url:"/theatre"
-            },
-            {
-              title:"Surgery Booking",
-              url:"/theatre/surgery-booking"
-            },
-            {
-              title:"Surgeon Module",
-              url:"/theatre/surgeon"
-            },
-            {
-              title:"Anesthetist Module",
-              url:"/theatre/anesthetist"
-            },
-            {
-              title:"Consumables Management",
-              url:"/theatre/consumables"
-            },
-            {
-              title:"Safety Checklist",
-              url:"/theatre/safety-checklist"
-            },
-            {
-              title:"Recovery Room",
-              url:"/theatre/recovery"
-            },
-            {
-              title:"Theatre Billing",
-              url:"/theatre/billing"
-            },
-            {
-              title:"Doctor Commissions",
-              url:"/theatre/commissions"
-            },
-            {
-              title:"Reports & Analytics",
-              url:"/theatre/reports"
-            }
-          ]
-        },
-        
-        {
-          title:"Dental",
-          url:"#",
-          icon: LayoutPanelLeft,
-          items:[
-            {
-              title:"Dental Queue",
-              url:"/dental-queue"
-            },
-            {
-              title:"Dental Visit",
-              url:"/dental-visit"
-            }
-          ]
-        },
-
-        {
-          title:"IPD",
-          url:"#",
-          icon: LayoutPanelLeft,
-          items:[
-            { 
-              title:"IPD Dashboard",
-              url:"/ipd"
-            },
-            {
-              title:"Admissions",
-              url:"/ipd/admissions"
-            },
-            {
-              title:"Vitals",
-              url:"/ipd/vitals"
-            },
-            {
-              title:"Medications",
-              url:"/ipd/medications"
-            },    
-            {
-              title:"Procedures",
-              url:"/ipd/procedures"
-            },
-            {
-              title:"Discharge",
-              url:"/ipd/discharge"
-            }
-          ] 
-        
-        },
-
-        {
-          title: "Errors",
-          url: "#",
-          icon: AlertTriangle,
-          items: [
-            {
-              title: "Unauthorized",
-              url: "/errors/unauthorized",
-            },
-            {
-              title: "Forbidden",
-              url: "/errors/forbidden",
-            },
-            {
-              title: "Not Found",
-              url: "/errors/not-found",
-            },
-            {
-              title: "Internal Server Error",
-              url: "/errors/internal-server-error",
-            },
-            {
-              title: "Under Maintenance",
-              url: "/errors/under-maintenance",
-            },
-          ],
-        },
-
-        {
-          title: "User Administration",
-          url: "#",
-          icon: Users,
-          items: [
-            {
-              title: "Admin",
-              url: "/users/admin",
-            },
-          ]
-        }, 
-      
-        {
-          title: "Settings",
-          url: "#",
-          icon: Settings,
-          items: [
-            {
-              title: "User Settings",
-              url: "/settings/user",
-            },
-            {
-              title: "Account Settings",
-              url: "/settings/account",
-            },
-            {
-              title: "Plans & Billing",
-              url: "/settings/billing",
-            },
-            {
-              title: "Appearance",
-              url: "/settings/appearance",
-            },
-            {
-              title: "Notifications",
-              url: "/settings/notifications",
-            },
-            {
-              title: "Connections",
-              url: "/settings/connections",
-            },
-          ],
-        },
-
-  
-        {
-          title: "FAQs",
-          url: "/faqs",
-          icon: HelpCircle,
-        },
-        {
-          title: "Pricing",
-          url: "/pricing",
-          icon: CreditCard,
-        },
-      ],
-    },
-  ],
+type NavigationItem = {
+  title: string
+  url: string
+  icon?: typeof LayoutDashboard
+  roles?: readonly StaffRole[]
+  items?: { title: string; url: string; roles?: readonly StaffRole[] }[]
 }
 
-export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+type NavigationGroup = { label: string; items: NavigationItem[] }
+
+const navigation: NavigationGroup[] = [
+  {
+    label: "Overview",
+    items: [
+      { title: "Hospital dashboard", url: "/dashboard", icon: LayoutDashboard, roles: ["ADMIN"] },
+      { title: "Payments dashboard", url: "/billing-dashboard", icon: CreditCard, roles: ["FINANCE"] },
+      { title: "Laboratory dashboard", url: "/lab", icon: FlaskConical, roles: ["LAB"] },
+      { title: "Pharmacy dashboard", url: "/pharmacy-dashboard", icon: Pill, roles: ["PHARMACY"] },
+      { title: "Registration", url: "/register-patient", icon: UserRoundPlus, roles: ["RECEPTION"] },
+      { title: "OPD queue", url: "/opd-queue", icon: Stethoscope, roles: ["DOCTOR"] },
+      { title: "Triage queue", url: "/triage-queue", icon: Activity, roles: ["NURSE"] },
+      { title: "Calendar", url: "/calendar", icon: CalendarDays },
+    ],
+  },
+  {
+    label: "Patient care",
+    items: [
+      {
+        title: "Reception",
+        url: "#",
+        icon: UserRoundPlus,
+        items: [
+          { title: "Registration", url: "/register-patient" },
+          { title: "Patient register", url: "/view-patients" },
+        ],
+        roles: ["ADMIN", "RECEPTION"],
+      },
+      {
+        title: "Triage",
+        url: "#",
+        icon: Activity,
+        items: [
+          { title: "Triage queue", url: "/triage-queue" },
+          { title: "Record vitals", url: "/triage-form" },
+        ],
+        roles: ["ADMIN", "DOCTOR", "NURSE"],
+      },
+      {
+        title: "Outpatient (OPD)",
+        url: "#",
+        icon: Stethoscope,
+        items: [
+          { title: "OPD queue", url: "/opd-queue" },
+          { title: "Consultation", url: "/opd-visit" },
+          { title: "Admit patient", url: "/admit" },
+        ],
+        roles: ["ADMIN", "DOCTOR", "NURSE"],
+      },
+      {
+        title: "Inpatient (IPD)",
+        url: "#",
+        icon: BedDouble,
+        items: [
+          { title: "IPD overview", url: "/ipd" },
+          { title: "Inpatient list", url: "/ipd/admissions" },
+          { title: "Record vitals", url: "/ipd/vitals" },
+          { title: "Medication & MAR", url: "/ipd/medications" },
+          { title: "Clinical procedures", url: "/ipd/procedures" },
+          { title: "Discharge patients", url: "/ipd/discharge" },
+        ],
+        roles: ["ADMIN", "DOCTOR", "NURSE"],
+      },
+    ],
+  },
+  {
+    label: "Clinical services",
+    items: [
+      {
+        title: "Maternity",
+        url: "#",
+        icon: Baby,
+        items: [
+          { title: "Maternity queue", url: "/maternity-queue" },
+          { title: "New maternity case", url: "/maternity-new" },
+          { title: "Record delivery", url: "/delivery-record" },
+        ],
+        roles: ["ADMIN", "DOCTOR", "NURSE"],
+      },
+      {
+        title: "ANC & postnatal",
+        url: "#",
+        icon: HeartPulse,
+        items: [
+          { title: "ANC queue", url: "/anc-queue" },
+          { title: "New ANC visit", url: "/anc-new" },
+          { title: "Postnatal queue", url: "/postnatal-queue" },
+          { title: "New postnatal visit", url: "/postnatal-new" },
+        ],
+        roles: ["ADMIN", "DOCTOR", "NURSE"],
+      },
+      {
+        title: "Laboratory",
+        url: "#",
+        icon: FlaskConical,
+        items: [
+          { title: "Lab overview", url: "/lab" },
+          { title: "Paid requests", url: "/lab/lab-queue" },
+          { title: "Validate results", url: "/lab/validation" },
+          { title: "Release results", url: "/lab/delivery" },
+          { title: "Critical alerts", url: "/lab/alerts" },
+          { title: "Test catalogue", url: "/lab/lab-master" },
+        ],
+        roles: ["ADMIN", "LAB"],
+      },
+      {
+        title: "Pharmacy",
+        url: "#",
+        icon: Pill,
+        items: [
+          { title: "Pharmacy dashboard", url: "/pharmacy-dashboard" },
+          { title: "Prescriptions", url: "/prescriptions" },
+          { title: "Dispensing", url: "/dispensing" },
+          { title: "Stock management", url: "/stock-management" },
+          { title: "Stock levels", url: "/stock-levels" },
+          { title: "Stock received", url: "/stock-in" },
+          { title: "Expiry alerts", url: "/expiry-alerts" },
+          { title: "Suppliers", url: "/suppliers" },
+        ],
+        roles: ["ADMIN", "DOCTOR", "PHARMACY"],
+      },
+      {
+        title: "Theatre",
+        url: "#",
+        icon: Scissors,
+        items: [
+          { title: "Theatre dashboard", url: "/theatre" },
+          { title: "Surgery booking", url: "/theatre/surgery-booking" },
+          { title: "Safety checklist", url: "/theatre/safety-checklist" },
+          { title: "Recovery room", url: "/theatre/recovery" },
+          { title: "Consumables", url: "/theatre/consumables" },
+          { title: "Theatre billing", url: "/theatre/billing" },
+        ],
+        roles: ["ADMIN", "DOCTOR", "NURSE"],
+      },
+      {
+        title: "Dental",
+        url: "#",
+        icon: ClipboardPlus,
+        items: [{ title: "Dental queue", url: "/dental-queue" }],
+        roles: ["ADMIN", "DOCTOR", "NURSE"],
+      },
+    ],
+  },
+  {
+    label: "Operations",
+    items: [
+      {
+        title: "Billing",
+        url: "#",
+        icon: CreditCard,
+        items: [
+          { title: "Payments dashboard", url: "/billing-dashboard" },
+          { title: "Unpaid accounts", url: "/unpaid-patients" },
+          { title: "Paid accounts", url: "/paid-patients" },
+        ],
+        roles: ["ADMIN", "FINANCE", "RECEPTION"],
+      },
+      {
+        title: "Administration",
+        url: "#",
+        icon: ShieldCheck,
+        items: [
+          { title: "Admin dashboard", url: "/admin" },
+          { title: "User management", url: "/admin/create-users" },
+          { title: "Dental procedures", url: "/admin/dental-procedures" },
+        ],
+        roles: ["ADMIN"],
+      },
+      {
+        title: "Settings",
+        url: "#",
+        icon: Settings,
+        items: [
+          { title: "My account", url: "/settings/account" },
+          { title: "Appearance", url: "/settings/appearance" },
+          { title: "Notifications", url: "/settings/notifications" },
+        ],
+      },
+    ],
+  },
+]
+
+function visibleNavigation(role: StaffRole) {
+  return navigation
+    .map((group) => ({
+      ...group,
+      items: group.items
+        .filter((item) => !item.roles || item.roles.includes(role))
+        .map((item) => ({
+          ...item,
+          items: item.items?.filter((subItem) => !subItem.roles || subItem.roles.includes(role)),
+        }))
+        .filter((item) => !item.items || item.items.length > 0),
+    }))
+    .filter((group) => group.items.length > 0)
+}
+
+export function AppSidebar({
+  staff,
+  ...props
+}: React.ComponentProps<typeof Sidebar> & { staff: CurrentStaff }) {
+  const groups = visibleNavigation(staff.role)
+
   return (
     <Sidebar {...props}>
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton size="lg" asChild>
-              <Link href="/dashboard">
-                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
-                  <Logo size={24} className="text-current" />
+              <Link href="/home">
+                <div className="flex aspect-square size-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                  <Logo size={24} />
                 </div>
                 <div className="grid flex-1 text-left text-sm leading-tight">
-                  <span className="truncate font-medium">ShadcnStore</span>
-                  <span className="truncate text-xs">Admin Dashboard</span>
+                  <span className="truncate font-semibold">LifePoint Hospital</span>
+                  <span className="truncate text-xs text-muted-foreground">Care at every point</span>
                 </div>
               </Link>
             </SidebarMenuButton>
@@ -510,13 +267,12 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        {data.navGroups.map((group) => (
+        {groups.map((group) => (
           <NavMain key={group.label} label={group.label} items={group.items} />
         ))}
       </SidebarContent>
       <SidebarFooter>
-        <SidebarNotification />
-        <NavUser user={data.user} />
+        <NavUser staff={staff} />
       </SidebarFooter>
     </Sidebar>
   )

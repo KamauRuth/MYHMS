@@ -55,7 +55,11 @@ export default function LabResultDelivery() {
       return
     }
 
-    // Lab request status already updated when result was approved
+    const result = approvedResults.find((entry) => entry.id === resultId)
+    if (result?.request_id) {
+      await supabase.from("lab_requests").update({ status: "released" }).eq("id", result.request_id)
+    }
+
     alert("Result released to requesting department")
     loadApprovedResults()
   }
@@ -76,10 +80,10 @@ export default function LabResultDelivery() {
 
     // Patient Info
     doc.setFontSize(10)
-    doc.setFont(undefined, "bold")
+    doc.setFont("helvetica", "bold")
     doc.text("Patient Information", 20, yPosition)
     yPosition += 7
-    doc.setFont(undefined, "normal")
+    doc.setFont("helvetica", "normal")
     doc.text(
       `Name: ${result.lab_requests.visits?.patient?.first_name} ${result.lab_requests.visits?.patient?.last_name}`,
       20,
@@ -92,16 +96,16 @@ export default function LabResultDelivery() {
     yPosition += 12
 
     // Results Table
-    doc.setFont(undefined, "bold")
+    doc.setFont("helvetica", "bold")
     doc.text("Test Results", 20, yPosition)
     yPosition += 8
-    doc.setFont(undefined, "normal")
+    doc.setFont("helvetica", "normal")
 
     const results = JSON.parse(result.results || "[]")
     const tableStartY = yPosition
 
     // Table headers
-    doc.setFont(undefined, "bold")
+    doc.setFont("helvetica", "bold")
     doc.setFontSize(9)
     doc.text("Parameter", 20, yPosition)
     doc.text("Result", 70, yPosition)
@@ -113,7 +117,7 @@ export default function LabResultDelivery() {
     yPosition += 5
 
     // Table rows
-    doc.setFont(undefined, "normal")
+    doc.setFont("helvetica", "normal")
     results.forEach((param: any) => {
       if (yPosition > pageHeight - 30) {
         doc.addPage()
@@ -133,10 +137,10 @@ export default function LabResultDelivery() {
 
     // Comments
     yPosition += 10
-    doc.setFont(undefined, "bold")
+    doc.setFont("helvetica", "bold")
     doc.text("Comments:", 20, yPosition)
     yPosition += 6
-    doc.setFont(undefined, "normal")
+    doc.setFont("helvetica", "normal")
     const comments = result.comments || "None"
     const commentLines = doc.splitTextToSize(comments, 170)
     doc.text(commentLines, 20, yPosition)

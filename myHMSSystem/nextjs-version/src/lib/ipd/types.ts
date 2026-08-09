@@ -56,6 +56,8 @@ export interface CreateVitalInput {
   bp_diastolic?: number
   pulse?: number
   spo2?: number
+  respiratory_rate?: number | null
+  notes?: string | null
 }
 
 // Medications
@@ -85,8 +87,10 @@ export interface CreateMedicationInput {
   frequency: string
   route: string
   start_date: string
+  end_date?: string | null
+  duration_days?: number | null
   indication: string
-  special_instructions?: string
+  special_instructions?: string | null
   is_prn?: boolean
   prescribed_by?: string
 }
@@ -144,11 +148,14 @@ export interface Procedure {
 export interface CreateProcedureInput {
   admission_id: string
   procedure_name: string
+  procedure_code?: string | null
   scheduled_date: string
+  scheduled_time?: string | null
+  location?: string | null
   procedure_type: string
   urgency?: string
   indication: string
-  pre_operative_notes?: string
+  pre_operative_notes?: string | null
 }
 
 // Procedure Team
@@ -190,16 +197,23 @@ export interface DischargeSummary {
 
 export interface CreateDischargeSummaryInput {
   admission_id: string
+  discharge_date?: string
   discharge_type: string
   primary_diagnosis: string
   discharge_condition: string
   clinical_summary: string
-  secondary_diagnoses?: string
-  procedures_performed?: string
-  discharge_medication?: string
-  follow_up_instructions?: string
-  follow_up_date?: string
-  follow_up_department?: string
+  secondary_diagnoses?: string | null
+  procedures_performed?: string | null
+  investigations_done?: string | null
+  investigation_results?: string | null
+  discharge_medication?: string | null
+  follow_up_instructions?: string | null
+  follow_up_date?: string | null
+  follow_up_department?: string | null
+  advice_given?: string | null
+  patient_education?: string | null
+  referral_details?: string | null
+  destination?: string | null
 }
 
 // Dashboard Stats
@@ -216,10 +230,13 @@ export interface AdmissionWithPatient extends Admission {
     id: string
     first_name: string
     last_name: string
+    phone?: string | null
+    gender?: string | null
+    dob?: string | null
   }
 }
 
-export interface AdmissionDetail extends Admission {
+export type AdmissionDetail = Omit<Admission, 'discharge_summary'> & {
   daily_notes: DailyNote[]
   vitals: Vital[]
   medications: Medication[]

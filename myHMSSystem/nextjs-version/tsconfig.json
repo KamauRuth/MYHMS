@@ -37,6 +37,7 @@
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "src/app/(dashboard)/(opd)/opd-visit-billing-integration.example.tsx"
   ]
 }

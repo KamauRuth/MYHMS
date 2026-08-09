@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
 import Link from "next/link"
+import { VISIT_STATUS } from "@/lib/workflows/encounters"
 
 const supabase = createClient()
 
@@ -16,6 +17,7 @@ interface Visit {
   }
   paymentApproved?: boolean
   balance?: number
+  invoiceStatus?: string | null
 }
 
 export default function TriageQueue() {
@@ -37,17 +39,18 @@ export default function TriageQueue() {
           patient_id,
           patients(first_name, last_name)
         `)
-        .eq("status", "TRIAGE")
+        .eq("status", VISIT_STATUS.TRIAGE)
 
       if (data) {
         // Fetch payment details for each visit
         const visitsWithPayment = await Promise.all(
-          data.map(async (visit) => {
-            // Get invoices for this visit's patient
+          data.map(async (visit: any) => {
+            // Check the invoice for this encounter only. An older paid invoice
+            // must never unlock a newer unpaid visit for the same patient.
             const { data: invoices } = await supabase
               .from("invoices")
               .select("balance, status")
-              .eq("patient_id", visit.patient_id)
+              .eq("visit_id", visit.id)
               .order("created_at", { ascending: false })
               .limit(1)
 
@@ -59,7 +62,8 @@ export default function TriageQueue() {
             return {
               ...visit,
               paymentApproved,
-              balance: invoices?.[0]?.balance || 0
+              balance: invoices?.[0]?.balance || 0,
+              invoiceStatus: invoices?.[0]?.status || null
             }
           })
         )
@@ -95,9 +99,9 @@ export default function TriageQueue() {
             <div className="flex-1">
               <p className="font-medium">{v.patients.first_name} {v.patients.last_name}</p>
               <p className="text-sm text-gray-500">{v.clinic}</p>
-              {v.balance > 0 && (
+              {(v.balance ?? 0) > 0 && (
                 <p className="text-sm text-red-600 font-medium mt-1">
-                  ⚠️ Outstanding balance: KES {v.balance.toLocaleString()}
+                  Outstanding balance: KES {(v.balance ?? 0).toLocaleString()}
                 </p>
               )}
               {v.paymentApproved && (

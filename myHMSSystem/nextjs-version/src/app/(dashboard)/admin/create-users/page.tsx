@@ -27,6 +27,7 @@ interface CreatedUser {
 }
 
 const roleOptions = [
+  { value: 'ADMIN', label: 'Administrator' },
   { value: 'DOCTOR', label: '👨‍⚕️ Doctor' },
   { value: 'NURSE', label: '👩‍⚕️ Nurse' },
   { value: 'LAB', label: '🔬 Lab Technician' },
@@ -73,13 +74,13 @@ export default function BulkUserCreationPage() {
     setCreatedUsers([]);
 
     for (const form of forms) {
-      if (!form.email || !form.password || !form.role) {
+      if (!form.email || !form.password || !form.role || !form.firstName || !form.lastName) {
         setCreatedUsers(prev => [...prev, {
           email: form.email || 'Unknown',
           password: form.password,
           role: form.role,
           status: 'error',
-          message: 'Missing required fields (email, password, role)'
+          message: 'Email, password, role, first name, and last name are required'
         }]);
         continue;
       }
@@ -287,7 +288,7 @@ export default function BulkUserCreationPage() {
                   </Button>
                   <Button
                     onClick={createUsers}
-                    disabled={isCreating || forms.some(f => !f.email || !f.password || !f.role)}
+                    disabled={isCreating || forms.some(f => !f.email || !f.password || !f.role || !f.firstName || !f.lastName)}
                     size="lg"
                     className="flex-1 bg-blue-600 hover:bg-blue-700 text-white"
                   >

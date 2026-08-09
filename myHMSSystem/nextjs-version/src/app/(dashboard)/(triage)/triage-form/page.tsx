@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
+import { TRIAGE_STATUS, VISIT_STATUS } from "@/lib/workflows/encounters"
 
 const supabase = createClient()
 
@@ -167,8 +168,8 @@ export default function TriageForm() {
   await supabase
     .from("visits")
     .update({
-      status: clinic === "DENTAL" ? "WAITING_DENTIST" : "WAITING_DOCTOR",
-      triage_status: "completed"
+      status: clinic === "DENTAL" ? VISIT_STATUS.WAITING_DENTIST : VISIT_STATUS.WAITING_DOCTOR,
+      triage_status: TRIAGE_STATUS.COMPLETED
     })
     .eq("id", visitId)
 

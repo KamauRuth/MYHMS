@@ -11,14 +11,16 @@ import {
   SidebarInset,
   SidebarProvider,
 } from "@/components/ui/sidebar"
+import type { CurrentStaff } from "@/lib/auth/roles"
 
 interface BaseLayoutProps {
   children: React.ReactNode
   title?: string
   description?: string
+  staff: CurrentStaff
 }
 
-export function BaseLayout({ children, title, description }: BaseLayoutProps) {
+export function BaseLayout({ children, title, description, staff }: BaseLayoutProps) {
   const [themeCustomizerOpen, setThemeCustomizerOpen] = React.useState(false)
   const { config } = useSidebarConfig()
 
@@ -36,12 +38,13 @@ export function BaseLayout({ children, title, description }: BaseLayoutProps) {
       {config.side === "left" ? (
         <>
           <AppSidebar 
+            staff={staff}
             variant={config.variant} 
             collapsible={config.collapsible} 
             side={config.side} 
           />
           <SidebarInset>
-            <SiteHeader />
+            <SiteHeader staff={staff} />
             <div className="flex flex-1 flex-col">
               <div className="@container/main flex flex-1 flex-col gap-2">
                 <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
@@ -65,7 +68,7 @@ export function BaseLayout({ children, title, description }: BaseLayoutProps) {
       ) : (
         <>
           <SidebarInset>
-            <SiteHeader />
+            <SiteHeader staff={staff} />
             <div className="flex flex-1 flex-col">
               <div className="@container/main flex flex-1 flex-col gap-2">
                 <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
@@ -86,6 +89,7 @@ export function BaseLayout({ children, title, description }: BaseLayoutProps) {
             <SiteFooter />
           </SidebarInset>
           <AppSidebar 
+            staff={staff}
             variant={config.variant} 
             collapsible={config.collapsible} 
             side={config.side} 

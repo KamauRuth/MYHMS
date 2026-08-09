@@ -2,10 +2,10 @@
 
 import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { ArrowLeft, Plus, FileText, Activity, Pill, Calendar } from 'lucide-react'
+import { ArrowLeft, Plus, FileText, Activity, Pill, Calendar, BedDouble, CheckCircle2, AlertTriangle, LogOut } from 'lucide-react'
 import Link from 'next/link'
 import {
-  getAdmissionById,
+  getAdmissionByIdWithPatient,
   getDailyNotes,
   getVitals,
   getMedications,
@@ -22,7 +22,7 @@ import {
   getProcedureStatusColor,
 } from '@/lib/ipd/utils'
 import type {
-  Admission,
+  AdmissionWithPatient,
   DailyNote,
   Vital,
   Medication,
@@ -34,7 +34,7 @@ export default function AdmissionDetailPage() {
   const params = useParams()
   const admissionId = params.id as string
 
-  const [admission, setAdmission] = useState<Admission | null>(null)
+  const [admission, setAdmission] = useState<AdmissionWithPatient | null>(null)
   const [dailyNotes, setDailyNotes] = useState<DailyNote[]>([])
   const [vitals, setVitals] = useState<Vital[]>([])
   const [medications, setMedications] = useState<Medication[]>([])
@@ -52,7 +52,7 @@ export default function AdmissionDetailPage() {
         setLoading(true)
         const [admissionData, notesData, vitalsData, medsData, procsData, dischargeSummaryData] =
           await Promise.all([
-            getAdmissionById(admissionId),
+            getAdmissionByIdWithPatient(admissionId),
             getDailyNotes(admissionId),
             getVitals(admissionId),
             getMedications(admissionId),
@@ -105,15 +105,30 @@ export default function AdmissionDetailPage() {
   }
 
   const latestVital = vitals[0] || null
+  const activeMedications = medications.filter((medication) => medication.status === 'ACTIVE').length
+  const openProcedures = procedures.filter((procedure) => !['COMPLETED', 'CANCELLED'].includes(procedure.status)).length
+  const dischargeReady = Boolean(latestVital && dailyNotes.length > 0 && openProcedures === 0)
 
   return (
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <Link href="/ipd" className="text-blue-600 hover:text-blue-800 flex items-center gap-2 mb-4">
+        <Link href="/ipd/admissions" className="text-blue-600 hover:text-blue-800 flex items-center gap-2 mb-4">
           <ArrowLeft className="h-5 w-5" />
-          Back to IPD
+          Back to inpatient list
         </Link>
+
+        <div className="mb-6 flex flex-col gap-4 rounded-2xl bg-slate-950 p-6 text-white lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-blue-300">Active inpatient record</p>
+            <h1 className="mt-2 text-2xl font-bold">{admission.patient?.first_name} {admission.patient?.last_name}</h1>
+            <p className="mt-1 text-sm text-slate-300">Patient ID: {admission.patient_id} · {admission.ward || 'Ward not assigned'}</p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link href={`/ipd/admission/${admissionId}/vitals/new`} className="inline-flex items-center gap-2 rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold hover:bg-white/20"><Activity className="h-4 w-4" /> Record vitals</Link>
+            <Link href={`/ipd/admission/${admissionId}/notes/new`} className="inline-flex items-center gap-2 rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold hover:bg-white/20"><FileText className="h-4 w-4" /> Add note</Link>
+            <Link href={`/ipd/admission/${admissionId}/discharge/new`} className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-2 text-sm font-semibold hover:bg-blue-500"><LogOut className="h-4 w-4" /> Prepare discharge</Link>
+          </div>
+        </div>
 
         {/* Admission Info Card */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 mb-6">
@@ -141,6 +156,13 @@ export default function AdmissionDetailPage() {
             <p className="text-sm text-gray-600 mb-2">Reason for Admission</p>
             <p className="text-gray-900">{admission.reason}</p>
           </div>
+        </div>
+
+        <div className="mb-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <button onClick={() => setActiveTab('vitals')} className="rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-blue-300"><p className="text-xs font-medium uppercase tracking-wide text-slate-500">Observations</p><p className="mt-1 text-xl font-bold text-slate-950">{vitals.length}</p><p className="text-xs text-slate-500">Latest {latestVital ? formatDateTime(latestVital.created_at) : 'not recorded'}</p></button>
+          <button onClick={() => setActiveTab('meds')} className="rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-blue-300"><p className="text-xs font-medium uppercase tracking-wide text-slate-500">Active medication</p><p className="mt-1 text-xl font-bold text-slate-950">{activeMedications}</p><p className="text-xs text-slate-500">{medications.length} total order(s)</p></button>
+          <button onClick={() => setActiveTab('procedures')} className="rounded-xl border border-slate-200 bg-white p-4 text-left shadow-sm hover:border-blue-300"><p className="text-xs font-medium uppercase tracking-wide text-slate-500">Open procedures</p><p className="mt-1 text-xl font-bold text-slate-950">{openProcedures}</p><p className="text-xs text-slate-500">Require follow-through</p></button>
+          <button onClick={() => setActiveTab('discharge')} className={`rounded-xl border p-4 text-left shadow-sm ${dischargeReady ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}><p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-600">{dischargeReady ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <AlertTriangle className="h-4 w-4 text-amber-600" />} Discharge readiness</p><p className="mt-1 text-lg font-bold text-slate-950">{dischargeSummary ? 'Completed' : dischargeReady ? 'Review ready' : 'Care ongoing'}</p><p className="text-xs text-slate-500">Clinical review still required</p></button>
         </div>
 
         {/* Latest Vitals */}
@@ -182,20 +204,20 @@ export default function AdmissionDetailPage() {
         )}
 
         {/* Tabs */}
-        <div className="flex gap-2 mb-6 bg-white rounded-lg shadow-sm border border-gray-200 p-2">
+        <div className="flex gap-2 mb-6 overflow-x-auto bg-white rounded-lg shadow-sm border border-gray-200 p-2">
           {[
-            { id: 'notes' as const, label: 'Daily Notes', icon: FileText },
-            { id: 'vitals' as const, label: 'Vitals', icon: Activity },
-            { id: 'meds' as const, label: 'Medications', icon: Pill },
-            { id: 'procedures' as const, label: 'Procedures', icon: Calendar },
-            { id: 'discharge' as const, label: 'Discharge', icon: ArrowLeft },
+            { id: 'notes' as const, label: `Daily Notes (${dailyNotes.length})`, icon: FileText },
+            { id: 'vitals' as const, label: `Vitals (${vitals.length})`, icon: Activity },
+            { id: 'meds' as const, label: `Medications (${medications.length})`, icon: Pill },
+            { id: 'procedures' as const, label: `Procedures (${procedures.length})`, icon: Calendar },
+            { id: 'discharge' as const, label: 'Discharge', icon: BedDouble },
           ].map((tab) => {
             const Icon = tab.icon
             return (
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center gap-2 px-4 py-2 rounded transition ${
+                className={`flex shrink-0 items-center gap-2 px-4 py-2 rounded transition ${
                   activeTab === tab.id
                     ? 'bg-blue-600 text-white'
                     : 'text-gray-700 hover:bg-gray-100'

@@ -13,6 +13,7 @@ import { Logo } from "@/components/logo"
 import Link from "next/link"
 import Image from "next/image"
 import image from "@/assets/image.png"
+import { startBrowserSession } from "@/lib/auth/browser-session"
 
 export function LoginForm3({
   className,
@@ -44,7 +45,9 @@ export function LoginForm3({
       return
     }
 
-    router.push("/dashboard")
+    startBrowserSession()
+    router.replace("/home")
+    router.refresh()
   }
 
   return (

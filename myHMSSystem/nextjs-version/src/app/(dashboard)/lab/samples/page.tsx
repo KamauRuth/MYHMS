@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
+import Link from "next/link"
 import { createClient } from "@/lib/supabase/client"
 
 const supabase = createClient()
@@ -21,6 +22,8 @@ export default function LabSamples() {
       loadRequest()
       loadSamples()
       loadUser()
+    } else {
+      setLoading(false)
     }
   }, [requestId])
 
@@ -98,6 +101,7 @@ export default function LabSamples() {
       console.error("Failed to add sample", error.message || error)
       alert("Could not add sample")
     } else {
+      await supabase.from("lab_requests").update({ status: "sample_collected" }).eq("id", requestId)
       loadSamples()
     }
   }
@@ -116,6 +120,7 @@ export default function LabSamples() {
   }
 
   if (loading) return <p className="p-6">Loading samples...</p>
+  if (!requestId) return <div className="p-8 text-center"><p className="font-semibold text-slate-800">Select a paid request first</p><p className="mt-1 text-sm text-slate-500">Sample collection starts from the paid lab queue.</p><Link href="/lab/lab-queue" className="mt-4 inline-flex rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Open paid requests</Link></div>
   if (!request) return <p className="p-6">Request not found.</p>
 
   return (
@@ -196,6 +201,7 @@ export default function LabSamples() {
               Add Sample
             </button>
           </form>
+          {samples.length > 0 && <div className="mt-4 flex justify-end"><Link href={`/lab/results?requestId=${requestId}`} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">Continue to result entry</Link></div>}
         </div>
       </div>
     </div>

@@ -1,5 +1,10 @@
+-- LEGACY FILE — DO NOT INSERT DIRECTLY INTO auth.users.
+-- Use `node --env-file=.env scripts/setup-test-users.js` instead.
+-- Direct auth.users inserts do not create auth.identities and produce malformed users.
+-- If this legacy script was previously run, execute repair-malformed-test-auth-users.sql first.
+
 -- ============================================
--- MYHMS Test User Setup - SQL Commands
+-- MYHMS Test User Setup - SQL Commands (legacy reference only)
 -- ============================================
 -- Run each section in Supabase SQL Editor
 -- Copy the entire section and paste into editor

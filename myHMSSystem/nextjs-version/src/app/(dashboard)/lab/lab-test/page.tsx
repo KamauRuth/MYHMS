@@ -22,15 +22,15 @@ export default function LabTest() {
       .from("lab_requests")
       .select(`
         *,
-        lab_test_master(template),
-        invoices(status)
+        payment_status,
+        lab_test_master(test_name,template)
       `)
       .eq("id",id)
       .single()
 
-    if(data.invoices.status !== "paid"){
+    if (!data || String(data.payment_status || "").toLowerCase() !== "paid") {
       alert("Payment not completed")
-      window.location.href="/lab-queue"
+      window.location.href="/lab/lab-queue"
       return
     }
 
@@ -57,7 +57,7 @@ export default function LabTest() {
     <div className="p-8 space-y-6">
 
       <h1 className="text-xl font-bold">
-        {request.test_name}
+        {request.lab_test_master?.test_name || "Laboratory Test"}
       </h1>
 
       {request.lab_test_master?.template?.map((field:any)=>(

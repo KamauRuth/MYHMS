@@ -24,6 +24,7 @@ interface DentalProcedureRecord {
   status: string
   cost: number
   procedure?: Procedure
+  procedure_master?: Procedure
 }
 
 export default function ProceduresTab({ visit }: { visit: any }) {

@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { generateBillingForOPDAction } from "@/app/actions/billingActions"
+import { VISIT_STATUS } from "@/lib/workflows/encounters"
 
 
 const supabase = createClient()
@@ -62,6 +63,28 @@ const formatDateTime = (value?: string | null) => {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
 }
 
+const getEstimatedTurnaroundMinutes = (testName = "") => {
+  const name = testName.toLowerCase()
+  if (name.includes("histology") || name.includes("biopsy")) return 5 * 24 * 60
+  if (name.includes("culture")) return 48 * 60
+  if (name.includes("genexpert") || name.includes("gene xpert")) return 2 * 60
+  if (name.includes("full blood") || name.includes("fbc") || name.includes("cbc")) return 60
+  if (name.includes("malaria") || name.includes("rdt")) return 60
+  if (name.includes("electrolyte") || name.includes("chemistry") || name.includes("liver") || name.includes("renal")) return 2 * 60
+  return 2 * 60
+}
+
+const formatDuration = (minutes: number) => {
+  const safeMinutes = Math.max(0, Math.round(minutes))
+  if (safeMinutes < 60) return `${safeMinutes} min`
+  const hours = Math.floor(safeMinutes / 60)
+  const remainingMinutes = safeMinutes % 60
+  if (hours < 24) return remainingMinutes ? `${hours} hr ${remainingMinutes} min` : `${hours} hr`
+  const days = Math.floor(hours / 24)
+  const remainingHours = hours % 24
+  return remainingHours ? `${days} day ${remainingHours} hr` : `${days} day`
+}
+
 const getLatestLabResult = (labRequest: any) => {
   const items = Array.isArray(labRequest?.lab_results) ? labRequest.lab_results : []
   if (items.length === 0) return null
@@ -109,7 +132,9 @@ export default function OPDVisit() {
   const [labs, setLabs] = useState([""])
   const [labTests, setLabTests] = useState<any[]>([])
   const [labRequests, setLabRequests] = useState<any[]>([])
+  const [labRequestError, setLabRequestError] = useState("")
   const [hasPendingLabs, setHasPendingLabs] = useState(false)
+  const [labClock, setLabClock] = useState(Date.now())
 
   const isDangerDiagnosis = (title = "") =>
     DANGER_KEYWORDS.some(k => title.toLowerCase().includes(k))
@@ -204,6 +229,7 @@ export default function OPDVisit() {
         .select(`
           id,
           visit_no,
+          status,
           patient:patients (id, first_name, last_name)
         `)
         .eq("id", visitId)
@@ -213,6 +239,16 @@ export default function OPDVisit() {
         alert("Visit not found")
         router.push("/opd-queue")
         return
+      }
+
+      if (visitData.status === VISIT_STATUS.WAITING_DOCTOR) {
+        const { error: statusError } = await supabase
+          .from("visits")
+          .update({ status: VISIT_STATUS.IN_PROGRESS })
+          .eq("id", visitId)
+          .eq("status", VISIT_STATUS.WAITING_DOCTOR)
+
+        if (!statusError) visitData.status = VISIT_STATUS.IN_PROGRESS
       }
 
       const { data: triageData } = await supabase
@@ -325,10 +361,9 @@ useEffect(() => {
 
 }, [visitId])
 
-  useEffect(() => {
-    if (!visitId) return
-
-    const loadLabRequests = async () => {
+  const loadLabRequests = useCallback(async () => {
+      if (!visitId) return
+      setLabRequestError("")
       const { data, error } = await supabase
         .from("lab_requests")
         .select(`
@@ -336,7 +371,7 @@ useEffect(() => {
           visit_id,
           test_id,
           status,
-          notes,
+          payment_status,
           created_at,
           lab_test_master (
             id,
@@ -358,6 +393,7 @@ useEffect(() => {
 
       if (error) {
         console.error("Failed to load lab requests:", error)
+        setLabRequestError(error.message || "Unable to load lab requests")
         return
       }
 
@@ -373,10 +409,15 @@ useEffect(() => {
       })
 
       setHasPendingLabs(waitingForReview)
-    }
-
-    loadLabRequests()
+      setLabClock(Date.now())
   }, [visitId])
+
+  useEffect(() => {
+    if (!visitId) return
+    loadLabRequests()
+    const interval = setInterval(loadLabRequests, 10000)
+    return () => clearInterval(interval)
+  }, [visitId, loadLabRequests])
   // =========================
   // ICD-11 SUGGESTIONS
   // =========================
@@ -582,8 +623,11 @@ const handleDiagnosisKeyDown = (e: any) => {
     // 3️⃣ Get invoice for this visit
     let { data: invoice } = await supabase
       .from("invoices")
-      .select("*")
+      .select("*, invoice_items!inner(item_type)")
       .eq("visit_id", visit.id)
+      .eq("status", "unpaid")
+      .eq("invoice_items.item_type", "lab_test")
+      .limit(1)
       .maybeSingle();
 
     // 4️⃣ Create invoice if none exists
@@ -594,7 +638,7 @@ const handleDiagnosisKeyDown = (e: any) => {
         .insert({
           visit_id: visit.id,
           patient_id: visit.patient.id,
-          invoice_number: `INV-${Date.now()}`,
+          invoice_number: `LAB-${Date.now()}`,
           status: "unpaid",
           total_amount: 0,
           paid_amount: 0,
@@ -660,8 +704,8 @@ const handleDiagnosisKeyDown = (e: any) => {
       .from("invoice_items")
       .insert({
         invoice_id: invoice.id,
-        item_type: "lab",
-        item_id: test.id,
+        item_type: "lab_test",
+        item_id: labRequest.id,
         description: test.test_name,
         quantity: 1,
         unit_price: test.price,
@@ -689,11 +733,14 @@ const handleDiagnosisKeyDown = (e: any) => {
       0
     );
 
+    const alreadyPaid = Number(invoice.paid_amount || 0);
+    const outstandingBalance = Math.max(0, newTotal - alreadyPaid);
     const { error: updateError } = await supabase
       .from("invoices")
       .update({
         total_amount: newTotal,
-        balance: newTotal
+        balance: outstandingBalance,
+        status: outstandingBalance > 0 ? "unpaid" : "paid"
       })
       .eq("id", invoice.id);
 
@@ -708,6 +755,8 @@ const handleDiagnosisKeyDown = (e: any) => {
     console.log(`Lab request created and billed: ${test.test_name}`);
   }
 
+  await loadLabRequests();
+  setLabs([""])
   alert("Lab requests created and added to billing.");
   } catch (err) {
     console.error("Unexpected error in sendLab:", err);
@@ -990,7 +1039,11 @@ const handleDiagnosisKeyDown = (e: any) => {
       </div>
     </div>
 
-    {labRequests.length === 0 ? (
+    {labRequestError ? (
+      <div className="rounded-xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">
+        Lab requests could not be loaded: {labRequestError}
+      </div>
+    ) : labRequests.length === 0 ? (
       <div className="rounded-xl border border-dashed border-gray-300 p-5 text-sm text-gray-500">
         No lab requests have been created for this visit yet.
       </div>
@@ -1001,6 +1054,14 @@ const handleDiagnosisKeyDown = (e: any) => {
           const rows = parseResultRows(latestResult?.results)
           const status = String(latestResult?.status || request.status || "pending").toLowerCase()
           const released = ["released", "approved"].includes(status)
+          const createdAt = new Date(request.created_at).getTime()
+          const elapsedMinutes = Number.isNaN(createdAt) ? 0 : (labClock - createdAt) / 60000
+          const estimatedMinutes = getEstimatedTurnaroundMinutes(request.lab_test_master?.test_name)
+          const remainingMinutes = Math.max(0, estimatedMinutes - elapsedMinutes)
+          const overdue = !released && elapsedMinutes > estimatedMinutes
+          const statusLabel = released
+            ? "Released"
+            : status.replace(/_/g, " ").replace(/\b\w/g, (letter: string) => letter.toUpperCase())
 
           return (
             <div key={request.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-5 shadow-sm">
@@ -1011,8 +1072,32 @@ const handleDiagnosisKeyDown = (e: any) => {
                   <p className="text-sm text-slate-600">Created: {formatDateTime(request.created_at)}</p>
                 </div>
 
-                <div className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${released ? "bg-emerald-100 text-emerald-700" : latestResult ? "bg-amber-100 text-amber-700" : "bg-slate-200 text-slate-700"}`}>
-                  {released ? "Released" : latestResult ? String(latestResult.status || "Awaiting review") : "Awaiting result"}
+                <div className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${released ? "bg-emerald-100 text-emerald-700" : overdue ? "bg-rose-100 text-rose-700" : latestResult ? "bg-amber-100 text-amber-700" : "bg-slate-200 text-slate-700"}`}>
+                  {statusLabel}
+                </div>
+              </div>
+
+              <div className="mt-3 flex items-center gap-2 text-xs">
+                <span className={`rounded-full px-2.5 py-1 font-semibold ${String(request.payment_status || "").toLowerCase() === "paid" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-800"}`}>
+                  Payment: {String(request.payment_status || "unpaid").toUpperCase()}
+                </span>
+                {String(request.payment_status || "").toLowerCase() !== "paid" && <span className="text-slate-500">Waiting for Finance approval</span>}
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg border bg-white p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Elapsed</p>
+                  <p className="mt-1 font-semibold text-slate-900">{formatDuration(elapsedMinutes)}</p>
+                </div>
+                <div className="rounded-lg border bg-white p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Estimated turnaround</p>
+                  <p className="mt-1 font-semibold text-slate-900">{formatDuration(estimatedMinutes)}</p>
+                </div>
+                <div className={`rounded-lg border p-3 ${overdue ? "border-rose-200 bg-rose-50" : "bg-white"}`}>
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Expected</p>
+                  <p className={`mt-1 font-semibold ${overdue ? "text-rose-700" : "text-slate-900"}`}>
+                    {released ? "Completed" : overdue ? `Overdue by ${formatDuration(elapsedMinutes - estimatedMinutes)}` : `${formatDuration(remainingMinutes)} remaining`}
+                  </p>
                 </div>
               </div>
 

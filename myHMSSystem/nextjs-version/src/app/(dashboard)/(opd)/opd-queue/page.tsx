@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
+import { PAYMENT_STATUS, VISIT_STATUS } from "@/lib/workflows/encounters"
 
 const supabase = createClient()
 
@@ -17,6 +18,7 @@ const statusLabel = (s: string) => {
 export default function OPDQueue() {
   const [queue, setQueue] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
+  const [openingVisitId, setOpeningVisitId] = useState<string | null>(null)
 
   const router = useRouter()
 
@@ -29,6 +31,7 @@ export default function OPDQueue() {
         .select(`
           id,
           status,
+          payment_status,
           created_at,
           patients (
             first_name,
@@ -36,9 +39,9 @@ export default function OPDQueue() {
           )
         `)
         .in("status", [
-          "WAITING_DOCTOR",
-          "IN_PROGRESS",
-          "WAITING_LAB_RESULTS"
+          VISIT_STATUS.WAITING_DOCTOR,
+          VISIT_STATUS.IN_PROGRESS,
+          VISIT_STATUS.WAITING_LAB_RESULTS
         ])
         .order("created_at", { ascending: true })
 
@@ -60,6 +63,33 @@ export default function OPDQueue() {
 
     return () => clearInterval(interval)
   }, [])
+
+  const openVisit = async (visit: any) => {
+    if (visit.payment_status !== PAYMENT_STATUS.PAID) return
+
+    try {
+      setOpeningVisitId(visit.id)
+
+      if (visit.status === VISIT_STATUS.WAITING_DOCTOR) {
+        const { error } = await supabase
+          .from("visits")
+          .update({ status: VISIT_STATUS.IN_PROGRESS })
+          .eq("id", visit.id)
+          .eq("status", VISIT_STATUS.WAITING_DOCTOR)
+
+        if (error) throw error
+        setQueue((current) => current.map((item) =>
+          item.id === visit.id ? { ...item, status: VISIT_STATUS.IN_PROGRESS } : item
+        ))
+      }
+
+      router.push(`/opd-visit?visitId=${visit.id}`)
+    } catch (error: any) {
+      alert(`Unable to open consultation: ${error.message}`)
+    } finally {
+      setOpeningVisitId(null)
+    }
+  }
 
   return (
     <div className="p-6">
@@ -95,15 +125,17 @@ export default function OPDQueue() {
               <span className="text-xs border px-2 py-1 rounded-full">
                 {statusLabel(v.status)}
               </span>
+              {v.payment_status !== PAYMENT_STATUS.PAID && (
+                <p className="mt-2 text-xs font-medium text-amber-700">Payment clearance required</p>
+              )}
             </div>
 
             <button
-              onClick={() =>
-                router.push(`/opd-visit?visitId=${v.id}`)
-              }
-              className="bg-black text-white px-4 py-2 rounded"
+              disabled={v.payment_status !== PAYMENT_STATUS.PAID || openingVisitId === v.id}
+              onClick={() => openVisit(v)}
+              className="bg-black text-white px-4 py-2 rounded disabled:cursor-not-allowed disabled:opacity-40"
             >
-              Open
+              {openingVisitId === v.id ? "Opening..." : v.status === VISIT_STATUS.WAITING_DOCTOR ? "Start consultation" : "Open"}
             </button>
           </div>
         ))}

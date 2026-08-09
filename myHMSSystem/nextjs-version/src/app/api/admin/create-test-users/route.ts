@@ -1,132 +1,105 @@
+import { NextResponse } from "next/server"
+import { z } from "zod"
+
+import { staffRoles } from "@/lib/auth/roles"
+import { createAdminClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
-import { NextRequest, NextResponse } from "next/server"
 
-export async function POST(request: NextRequest) {
+const createStaffSchema = z.object({
+  email: z.string().trim().email(),
+  password: z.string().min(10).max(128),
+  role: z.enum(staffRoles),
+  firstName: z.string().trim().min(1).max(80),
+  lastName: z.string().trim().min(1).max(80),
+})
+
+const departments: Record<(typeof staffRoles)[number], string> = {
+  ADMIN: "Administration",
+  DOCTOR: "OPD",
+  NURSE: "Nursing",
+  LAB: "Laboratory",
+  PHARMACY: "Pharmacy",
+  RECEPTION: "Reception",
+  FINANCE: "Finance",
+}
+
+export async function POST(request: Request) {
+  const supabase = await createClient()
+  const { data: authData } = await supabase.auth.getUser()
+
+  if (!authData.user) {
+    return NextResponse.json({ message: "Authentication required" }, { status: 401 })
+  }
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", authData.user.id)
+    .maybeSingle()
+
+  if (profile?.role !== "ADMIN") {
+    return NextResponse.json({ message: "Administrator access required" }, { status: 403 })
+  }
+
+  const parsed = createStaffSchema.safeParse(await request.json().catch(() => null))
+  if (!parsed.success) {
+    return NextResponse.json(
+      { message: parsed.error.issues[0]?.message || "Invalid staff details" },
+      { status: 400 }
+    )
+  }
+
+  const { email, password, role, firstName, lastName } = parsed.data
+
   try {
-    const supabase = createClient()
+    const admin = createAdminClient()
+    const { data: created, error: createError } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { role, first_name: firstName, last_name: lastName },
+    })
 
-    // Check if requester is admin
-    const { data: userData, error: userError } = await supabase.auth.getUser()
-    if (userError || !userData.user) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-    }
-
-    const { data: profile } = await supabase
-      .from("profiles")
-      .select("role")
-      .eq("id", userData.user.id)
-      .maybeSingle()
-
-    if (!profile || profile.role !== "ADMIN") {
-      return NextResponse.json({ error: "Only admins can create test users" }, { status: 403 })
-    }
-
-    // Get body
-    const body = await request.json()
-    const { email, password, role, firstName, lastName } = body
-
-    if (!email || !password || !role) {
+    if (createError || !created.user) {
       return NextResponse.json(
-        { message: "Missing required fields: email, password, role" },
+        { message: createError?.message || "Staff account could not be created" },
         { status: 400 }
       )
     }
 
-    try {
-      // Create auth user
-      const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    const staffId = `${role.slice(0, 3)}-${crypto.randomUUID().slice(0, 8).toUpperCase()}`
+    const { error: recordsError } = await admin.from("profiles").upsert({
+      id: created.user.id,
+      role,
+      created_at: new Date().toISOString(),
+    })
+
+    if (!recordsError) {
+      const { error: staffError } = await admin.from("staff").insert({
+        id: crypto.randomUUID(),
+        staff_id: staffId,
+        first_name: firstName,
+        last_name: lastName,
         email,
-        password,
-        email_confirm: true,
-        user_metadata: { role }
+        role,
+        department: departments[role],
+        is_active: true,
+        user_id: created.user.id,
+        created_at: new Date().toISOString(),
       })
 
-      if (authError) {
-        return NextResponse.json(
-          { message: authError.message },
-          { status: 400 }
-        )
+      if (!staffError) {
+        return NextResponse.json({ success: true, user: { id: created.user.id, email, role } })
       }
-
-      if (!authData.user) {
-        return NextResponse.json(
-          { message: "Failed to create user" },
-          { status: 500 }
-        )
-      }
-
-      // Create profile
-      const { error: profileError } = await supabase
-        .from("profiles")
-        .insert({
-          id: authData.user.id,
-          role: role,
-          created_at: new Date().toISOString()
-        })
-
-      if (profileError) {
-        // Rollback: delete auth user
-        await supabase.auth.admin.deleteUser(authData.user.id)
-        return NextResponse.json(
-          { message: `Profile creation failed: ${profileError.message}` },
-          { status: 400 }
-        )
-      }
-
-      // Create staff record
-      const staffId = `${role.substring(0, 3).toUpperCase()}${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`
-      
-      const { error: staffError } = await supabase
-        .from("staff")
-        .insert({
-          id: crypto.randomUUID?.() || `sys-${Math.random().toString(36).substr(2, 9)}`,
-          staff_id: staffId,
-          first_name: firstName || role,
-          last_name: lastName || "User",
-          email: email,
-          phone: `+254700${Math.floor(Math.random() * 9000000).toString().padStart(7, '0')}`,
-          role: role,
-          department: getDepartment(role),
-          is_active: true,
-          user_id: authData.user.id,
-          created_at: new Date().toISOString()
-        })
-
-      if (staffError) {
-        console.warn(`Staff record creation skipped: ${staffError.message}`)
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: `User ${email} created successfully`,
-        user: {
-          id: authData.user.id,
-          email: email,
-          role: role
-        }
-      })
-    } catch (err: any) {
-      return NextResponse.json(
-        { message: err.message || "Failed to create user" },
-        { status: 500 }
-      )
     }
-  } catch (err: any) {
-    console.error("Test user creation error:", err)
-    return NextResponse.json({ message: err.message || "Server error" }, { status: 500 })
+
+    await admin.auth.admin.deleteUser(created.user.id)
+    return NextResponse.json(
+      { message: recordsError?.message || "Staff profile could not be created" },
+      { status: 500 }
+    )
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Staff account could not be created"
+    return NextResponse.json({ message }, { status: 503 })
   }
 }
-
-function getDepartment(role: string): string {
-  const deptMap: Record<string, string> = {
-    DOCTOR: "OPD",
-    NURSE: "OPD",
-    LAB: "Laboratory",
-    PHARMACY: "Pharmacy",
-    RECEPTION: "Reception",
-    FINANCE: "Finance",
-    ADMIN: "Administration"
-  }
-  return deptMap[role] || "Other"
-}
-

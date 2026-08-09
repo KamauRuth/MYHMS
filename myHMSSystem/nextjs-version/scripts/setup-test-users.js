@@ -1,198 +1,143 @@
-const { createClient } = require('@supabase/supabase-js');
+const { createClient } = require("@supabase/supabase-js")
 
-// Load environment variables
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const url = process.env.NEXT_PUBLIC_SUPABASE_URL
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-  console.error('❌ Error: Missing environment variables');
-  console.error('Make sure .env.local has:');
-  console.error('  - NEXT_PUBLIC_SUPABASE_URL');
-  console.error('  - SUPABASE_SERVICE_ROLE_KEY');
-  process.exit(1);
+if (!url || !serviceRoleKey) {
+  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY")
+  process.exit(1)
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false,
-  },
-});
+const supabase = createClient(url, serviceRoleKey, {
+  auth: { autoRefreshToken: false, persistSession: false },
+})
 
-// Test users to create
-const testUsers = [
-  { email: 'admin@hospital.com', password: 'Admin@123456', role: 'ADMIN', name: 'System Administrator' },
-  { email: 'doctor1@hospital.com', password: 'Doctor@123456', role: 'DOCTOR', name: 'James Smith' },
-  { email: 'doctor2@hospital.com', password: 'Doctor@123456', role: 'DOCTOR', name: 'Sarah Johnson' },
-  { email: 'nurse1@hospital.com', password: 'Nurse@123456', role: 'NURSE', name: 'Emily Brown' },
-  { email: 'nurse2@hospital.com', password: 'Nurse@123456', role: 'NURSE', name: 'Michael Davis' },
-  { email: 'lab@hospital.com', password: 'Lab@123456', role: 'LAB', name: 'Lab Technician' },
-  { email: 'pharmacy@hospital.com', password: 'Pharmacy@123456', role: 'PHARMACY', name: 'Henry Kiplagat' },
-  { email: 'reception@hospital.com', password: 'Reception@123456', role: 'RECEPTION', name: 'Grace Kariuki' },
-  { email: 'finance@hospital.com', password: 'Finance@123456', role: 'FINANCE', name: 'David Mwangi' },
-];
+const users = [
+  { email: "admin@hospital.com", password: "Admin@123456", role: "ADMIN", firstName: "System", lastName: "Administrator", department: "Administration", staffId: "ADM001", phone: "+254700000001" },
+  { email: "doctor1@hospital.com", password: "Doctor@123456", role: "DOCTOR", firstName: "James", lastName: "Smith", department: "OPD", staffId: "DOC001", phone: "+254700000002", specialty: "General Medicine" },
+  { email: "doctor2@hospital.com", password: "Doctor@123456", role: "DOCTOR", firstName: "Sarah", lastName: "Johnson", department: "OPD", staffId: "DOC002", phone: "+254700000003", specialty: "Pediatrics" },
+  { email: "nurse1@hospital.com", password: "Nurse@123456", role: "NURSE", firstName: "Emily", lastName: "Brown", department: "Nursing", staffId: "NUR001", phone: "+254700000004" },
+  { email: "nurse2@hospital.com", password: "Nurse@123456", role: "NURSE", firstName: "Michael", lastName: "Davis", department: "Nursing", staffId: "NUR002", phone: "+254700000005" },
+  { email: "lab@hospital.com", password: "Lab@123456", role: "LAB", firstName: "Mary", lastName: "Wanjiku", department: "Laboratory", staffId: "LAB001", phone: "+254700000006" },
+  { email: "pharmacy@hospital.com", password: "Pharmacy@123456", role: "PHARMACY", firstName: "Henry", lastName: "Kiplagat", department: "Pharmacy", staffId: "PHM001", phone: "+254700000007" },
+  { email: "reception@hospital.com", password: "Reception@123456", role: "RECEPTION", firstName: "Grace", lastName: "Kariuki", department: "Reception", staffId: "RCP001", phone: "+254700000008" },
+  { email: "finance@hospital.com", password: "Finance@123456", role: "FINANCE", firstName: "David", lastName: "Mwangi", department: "Finance", staffId: "FIN001", phone: "+254700000009" },
+]
 
-async function createTestUsers() {
-  console.log('\n🏥 Starting Test User Setup\n');
-  console.log(`📊 Users to create: ${testUsers.length}`);
-  console.log('━'.repeat(60));
+async function findAuthUser(email) {
+  let page = 1
+  while (true) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage: 1000 })
+    if (error) throw error
+    const match = data.users.find((user) => user.email?.toLowerCase() === email.toLowerCase())
+    if (match) return match
+    if (data.users.length < 1000) return null
+    page += 1
+  }
+}
 
-  let successCount = 0;
-  let failureCount = 0;
-  const createdUsers = [];
+async function ensureUser(definition) {
+  let authUser = await findAuthUser(definition.email)
+  let action = "updated"
 
-  for (let i = 0; i < testUsers.length; i++) {
-    const user = testUsers[i];
-    const stepNum = i + 1;
+  if (!authUser) {
+    const { data, error } = await supabase.auth.admin.createUser({
+      email: definition.email,
+      password: definition.password,
+      email_confirm: true,
+      user_metadata: {
+        role: definition.role,
+        first_name: definition.firstName,
+        last_name: definition.lastName,
+        full_name: `${definition.firstName} ${definition.lastName}`,
+        name: `${definition.firstName} ${definition.lastName}`,
+      },
+    })
+    if (error || !data.user) throw error || new Error("Auth user was not created")
+    authUser = data.user
+    action = "created"
+  } else {
+    const { error } = await supabase.auth.admin.updateUserById(authUser.id, {
+      password: definition.password,
+      email_confirm: true,
+      user_metadata: {
+        ...authUser.user_metadata,
+        role: definition.role,
+        first_name: definition.firstName,
+        last_name: definition.lastName,
+        full_name: `${definition.firstName} ${definition.lastName}`,
+        name: `${definition.firstName} ${definition.lastName}`,
+      },
+    })
+    if (error) throw error
+  }
 
-    console.log(`\n[Step ${stepNum}/${testUsers.length}] Creating ${user.role}: ${user.email}`);
+  const { error: profileError } = await supabase.from("profiles").upsert(
+    { id: authUser.id, role: definition.role, created_at: new Date().toISOString() },
+    { onConflict: "id" }
+  )
+  if (profileError) throw new Error(`Profile: ${profileError.message}`)
 
+  const staffRecord = {
+    staff_id: definition.staffId,
+    first_name: definition.firstName,
+    last_name: definition.lastName,
+    email: definition.email,
+    phone: definition.phone,
+    role: definition.role,
+    specialty: definition.specialty || null,
+    department: definition.department,
+    is_active: true,
+    user_id: authUser.id,
+  }
+
+  const { data: existingStaff, error: lookupError } = await supabase
+    .from("staff")
+    .select("id")
+    .eq("email", definition.email)
+    .maybeSingle()
+  if (lookupError) throw new Error(`Staff lookup: ${lookupError.message}`)
+
+  const staffQuery = existingStaff
+    ? supabase.from("staff").update(staffRecord).eq("id", existingStaff.id)
+    : supabase.from("staff").insert({ id: crypto.randomUUID(), ...staffRecord })
+  const { error: staffError } = await staffQuery
+  if (staffError) throw new Error(`Staff: ${staffError.message}`)
+
+  return action
+}
+
+async function main() {
+  console.log(`Provisioning ${users.length} LifePoint staff accounts...`)
+  let failures = 0
+
+  for (const user of users) {
     try {
-      // Step 1: Create auth user
-      console.log(`  ✓ Creating auth user...`);
-      const { data: authUser, error: authError } = await supabase.auth.admin.createUser({
-        email: user.email,
-        password: user.password,
-        email_confirm: true,
-      });
-
-      if (authError) throw new Error(`Auth creation failed: ${authError.message}`);
-
-      const userId = authUser.user.id;
-      console.log(`  ✓ Auth user created (ID: ${userId.substring(0, 8)}...)`);
-
-      // Step 2: Create profile record
-      console.log(`  ✓ Creating profile record...`);
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert([
-          {
-            id: userId,
-            role: user.role,
-            facility_id: null,
-            created_at: new Date().toISOString(),
-          },
-        ]);
-
-      if (profileError) {
-        // Rollback: Delete the auth user
-        await supabase.auth.admin.deleteUser(userId);
-        throw new Error(`Profile creation failed: ${profileError.message}`);
-      }
-
-      console.log(`  ✓ Profile created with role: ${user.role}`);
-
-      // Step 3: Create staff record
-      console.log(`  ✓ Creating staff record...`);
-      const { error: staffError } = await supabase
-        .from('staff')
-        .insert([
-          {
-            id: crypto.randomUUID?.() || require('crypto').randomUUID(),
-            staff_id: `${user.role.substring(0, 3).toUpperCase()}${String(successCount + 1).padStart(3, '0')}`,
-            first_name: user.name.split(' ')[0],
-            last_name: user.name.split(' ').slice(1).join(' '),
-            email: user.email,
-            phone: `+254700000${String(stepNum).padStart(3, '0')}`,
-            role: user.role,
-            specialty: null,
-            department: getDepartment(user.role),
-            is_active: true,
-            user_id: userId,
-            created_at: new Date().toISOString(),
-          },
-        ]);
-
-      if (staffError) {
-        console.warn(`  ⚠ Staff record creation skipped: ${staffError.message}`);
-      } else {
-        console.log(`  ✓ Staff record created`);
-      }
-
-      createdUsers.push({
-        email: user.email,
-        password: user.password,
-        role: user.role,
-      });
-
-      successCount++;
-      console.log(`  ✅ ${user.email} setup complete`);
+      const action = await ensureUser(user)
+      console.log(`OK ${user.email} | ${user.role} | ${action}`)
     } catch (error) {
-      failureCount++;
-      console.error(`  ❌ Error: ${error.message}`);
+      failures += 1
+      console.error(`FAILED ${user.email} | ${error.message}`)
     }
   }
 
-  // Summary
-  console.log('\n' + '━'.repeat(60));
-  console.log('\n📋 Setup Summary:\n');
-  console.log(`  ✅ Successful: ${successCount}/${testUsers.length}`);
-  console.log(`  ❌ Failed: ${failureCount}/${testUsers.length}`);
+  const emails = users.map((user) => user.email)
+  const { data: staff, error } = await supabase
+    .from("staff")
+    .select("email,role,staff_id,department,is_active")
+    .in("email", emails)
+    .order("staff_id")
 
-  if (successCount > 0) {
-    console.log('\n🔑 Login Credentials:\n');
-    console.log('┌─────────────────────────┬──────────────────┬────────────┐');
-    console.log('│ Email                   │ Password         │ Role       │');
-    console.log('├─────────────────────────┼──────────────────┼────────────┤');
-
-    createdUsers.forEach((user) => {
-      const emailPad = user.email.padEnd(23);
-      const passPad = user.password.padEnd(16);
-      const rolePad = user.role.padEnd(10);
-      console.log(`│ ${emailPad} │ ${passPad} │ ${rolePad} │`);
-    });
-
-    console.log('└─────────────────────────┴──────────────────┴────────────┘');
+  if (error) throw error
+  console.log(`Verified ${staff.length}/${users.length} staff records`)
+  for (const record of staff) {
+    console.log(`VERIFIED ${record.staff_id} | ${record.email} | ${record.role} | active=${record.is_active}`)
   }
 
-  // Verification
-  console.log('\n🔍 Verifying in Database...\n');
-  const { data: profiles, error: profilesError } = await supabase
-    .from('profiles')
-    .select('id, role')
-    .in('role', ['ADMIN', 'DOCTOR', 'NURSE', 'LAB', 'PHARMACY', 'RECEPTION', 'FINANCE']);
-
-  if (!profilesError) {
-    console.log(`  ✓ Profiles found in database: ${profiles?.length || 0}`);
-  }
-
-  const { data: staff, error: staffError } = await supabase
-    .from('staff')
-    .select('id, email, role')
-    .in('role', ['ADMIN', 'DOCTOR', 'NURSE', 'LAB', 'PHARMACY', 'RECEPTION', 'FINANCE']);
-
-  if (!staffError) {
-    console.log(`  ✓ Staff records found in database: ${staff?.length || 0}`);
-  }
-
-  console.log('\n✨ Test user setup complete!\n');
-
-  if (successCount === testUsers.length) {
-    console.log('👉 Next Steps:');
-    console.log('  1. Login at http://localhost:3000/sign-in with any test user');
-    console.log('  2. Verify profile dropdown shows correct role');
-    console.log('  3. Test role-based access (admins can visit /dashboard/users)');
-    console.log('  4. Verify auto-department selection in OPD visit form\n');
-  } else {
-    console.log('⚠️  Some users failed to create. Check errors above.\n');
-  }
+  if (failures > 0 || staff.length !== users.length) process.exitCode = 1
 }
 
-function getDepartment(role) {
-  const deptMap = {
-    DOCTOR: 'OPD',
-    NURSE: 'OPD',
-    LAB: 'Laboratory',
-    PHARMACY: 'Pharmacy',
-    RECEPTION: 'Reception',
-    FINANCE: 'Finance',
-    ADMIN: 'Administration',
-  };
-  return deptMap[role] || 'Other';
-}
-
-// Run the setup
-createTestUsers().catch((error) => {
-  console.error('Fatal error:', error);
-  process.exit(1);
-});
+main().catch((error) => {
+  console.error(error.message)
+  process.exit(1)
+})

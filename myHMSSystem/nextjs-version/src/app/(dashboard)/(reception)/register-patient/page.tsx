@@ -2,11 +2,15 @@
 
 import { useState, useEffect } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { PAYMENT_STATUS, TRIAGE_STATUS, VISIT_STATUS } from "@/lib/workflows/encounters"
 
 const supabase = createClient()
 
 export default function RegisterPatientTableForm() {
   const [patients, setPatients] = useState<any[]>([])
+  const [services, setServices] = useState<any[]>([])
+  const [clearedInvoices, setClearedInvoices] = useState<any[]>([])
+  const [loadingCleared, setLoadingCleared] = useState(false)
   const [searchFirstName, setSearchFirstName] = useState("")
   const [searchLastName, setSearchLastName] = useState("")
   const [searchIdNumber, setSearchIdNumber] = useState("")
@@ -24,11 +28,16 @@ export default function RegisterPatientTableForm() {
     next_of_kin_name: "",
     next_of_kin_phone: "",
     clinic: "GENERAL",
-    payment_type: "CASH"
+    payment_type: "CASH",
+    service_id: ""
   })
 
   useEffect(() => {
     loadPatients()
+    loadServices()
+    loadClearedInvoices()
+    const interval = setInterval(loadClearedInvoices, 10000)
+    return () => clearInterval(interval)
   }, [])
 
   const resetForm = () => {
@@ -43,7 +52,8 @@ export default function RegisterPatientTableForm() {
       next_of_kin_name: "",
       next_of_kin_phone: "",
       clinic: "GENERAL",
-      payment_type: "CASH"
+      payment_type: "CASH",
+      service_id: ""
     })
   }
 
@@ -54,6 +64,36 @@ export default function RegisterPatientTableForm() {
       .order("created_at", { ascending: false })
 
     setPatients(data || [])
+  }
+
+  async function loadServices() {
+    const { data } = await supabase
+      .from("services")
+      .select("id,name,price")
+      .order("name")
+    setServices(data || [])
+  }
+
+  async function loadClearedInvoices() {
+    const { data } = await supabase
+      .from("invoices")
+      .select(`
+        id,
+        invoice_number,
+        total_amount,
+        paid_amount,
+        patient_id,
+        patients(id, first_name, last_name),
+        invoice_items(id, item_id, item_type, description)
+      `)
+      .eq("status", "paid")
+      .is("visit_id", null)
+      .order("created_at", { ascending: true })
+
+    const receptionInvoices = (data || []).filter((invoice: any) =>
+      invoice.invoice_items?.some((item: any) => item.item_type === "reception_service")
+    )
+    setClearedInvoices(receptionInvoices)
   }
 
   const normalize = (value: string) => value.trim().toLowerCase()
@@ -102,24 +142,68 @@ export default function RegisterPatientTableForm() {
     try {
       setCreatingVisitForPatientId(patient.id)
 
-      const visitType = "General"
+      const selectedService = services.find((service) => service.id === form.service_id)
+      if (!selectedService) throw new Error("Select a service before creating the visit")
+
+      const visitType = selectedService.name
+      const servicePrice = Number(selectedService.price || 0)
       const clinic = form.clinic || "GENERAL"
       const paymentMethod = form.payment_type || "Cash"
 
-      const { error: visitError } = await supabase.from("visits").insert({
+      if (servicePrice > 0) {
+        const { data: invoice, error: invoiceError } = await supabase
+          .from("invoices")
+          .insert({
+            patient_id: patient.id,
+            invoice_number: `INV-${Date.now()}`,
+            status: PAYMENT_STATUS.UNPAID,
+            total_amount: servicePrice,
+            paid_amount: 0,
+            balance: servicePrice,
+          })
+          .select()
+          .single()
+
+        if (invoiceError) throw new Error(`Billing request failed: ${invoiceError.message}`)
+
+        const { error: itemError } = await supabase.from("invoice_items").insert({
+          invoice_id: invoice.id,
+          item_type: "reception_service",
+          item_id: form.service_id,
+          description: selectedService.name,
+          quantity: 1,
+          unit_price: servicePrice,
+          total_price: servicePrice,
+        })
+
+        if (itemError) {
+          await supabase.from("invoices").delete().eq("id", invoice.id)
+          throw new Error(`Billing item failed: ${itemError.message}`)
+        }
+
+        alert(`Invoice ${invoice.invoice_number} created for ${patient.first_name} ${patient.last_name}. Send the patient to Finance.`)
+        resetForm()
+        setSearchFirstName("")
+        setSearchLastName("")
+        setSearchIdNumber("")
+        await loadPatients()
+        return
+      }
+
+      const { data: visit, error: visitError } = await supabase.from("visits").insert({
         patient_id: patient.id,
         visit_type: visitType,
         clinic,
         payment_method: paymentMethod,
-        payment_status: "paid",
+        payment_status: servicePrice > 0 ? PAYMENT_STATUS.UNPAID : PAYMENT_STATUS.PAID,
         visit_no: `OPD-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`,
-        status: "TRIAGE",
-        triage_status: "pending"
-      })
+        status: VISIT_STATUS.TRIAGE,
+        triage_status: TRIAGE_STATUS.PENDING
+      }).select().single()
 
       if (visitError) throw visitError
 
-      alert(`Visit created for ${patient.first_name} ${patient.last_name}.`)
+      alert(`Free-service visit created for ${patient.first_name} ${patient.last_name}. Patient is ready for triage.`)
       resetForm()
       setSearchFirstName("")
       setSearchLastName("")
@@ -129,6 +213,60 @@ export default function RegisterPatientTableForm() {
       alert("Error creating visit: " + error.message)
     } finally {
       setCreatingVisitForPatientId(null)
+    }
+  }
+
+  const inferClinic = (description: string) => {
+    const value = description.toLowerCase()
+    if (value.includes("dental") || value.includes("tooth") || value.includes("teeth")) return "DENTAL"
+    if (value.includes("postnatal")) return "POSTNATAL"
+    if (value.includes("antenatal") || value.includes("anc")) return "ANC"
+    if (value.includes("maternity") || value.includes("obstetric")) return "MATERNITY"
+    return "GENERAL"
+  }
+
+  async function createVisitFromPaidInvoice(invoice: any) {
+    try {
+      setLoadingCleared(true)
+      const item = invoice.invoice_items?.find((entry: any) => entry.item_type === "reception_service")
+      if (!item) throw new Error("The invoice has no reception service")
+
+      const { data: visit, error: visitError } = await supabase
+        .from("visits")
+        .insert({
+          patient_id: invoice.patient_id,
+          visit_type: item.description,
+          clinic: inferClinic(item.description || ""),
+          payment_method: "PAID",
+          payment_status: PAYMENT_STATUS.PAID,
+          visit_no: `OPD-${new Date().getFullYear()}-${Math.floor(100000 + Math.random() * 900000)}`,
+          status: VISIT_STATUS.TRIAGE,
+          triage_status: TRIAGE_STATUS.PENDING,
+        })
+        .select()
+        .single()
+
+      if (visitError) throw visitError
+
+      const { data: linkedInvoice, error: linkError } = await supabase
+        .from("invoices")
+        .update({ visit_id: visit.id })
+        .eq("id", invoice.id)
+        .is("visit_id", null)
+        .select("id")
+        .maybeSingle()
+
+      if (linkError || !linkedInvoice) {
+        await supabase.from("visits").delete().eq("id", visit.id)
+        throw new Error(linkError?.message || "This payment was already used to create a visit")
+      }
+
+      alert(`${invoice.patients?.first_name} ${invoice.patients?.last_name} has been sent to triage.`)
+      await loadClearedInvoices()
+    } catch (error: any) {
+      alert(`Unable to create visit: ${error.message}`)
+    } finally {
+      setLoadingCleared(false)
     }
   }
 
@@ -143,6 +281,10 @@ export default function RegisterPatientTableForm() {
     try {
       setIsSubmitting(true)
 
+      if (!form.first_name.trim() || !form.last_name.trim() || !form.dob || !form.service_id) {
+        throw new Error("First name, last name, date of birth, and service are required")
+      }
+
       const existingPatient = findExistingPatient()
 
       if (existingPatient) {
@@ -150,7 +292,7 @@ export default function RegisterPatientTableForm() {
         return
       }
 
-      const { error } = await supabase
+      const { data: newPatient, error } = await supabase
         .from("patients")
         .insert({
           first_name: form.first_name,
@@ -163,13 +305,13 @@ export default function RegisterPatientTableForm() {
           next_of_kin_name: form.next_of_kin_name,
           next_of_kin_phone: form.next_of_kin_phone
         })
+        .select()
+        .single()
 
       if (error) throw error
+      if (!newPatient) throw new Error("Patient record was not returned")
 
-      alert("Patient registered successfully.")
-
-      resetForm()
-      await loadPatients()
+      await createVisitForPatient(newPatient)
     } catch (error: any) {
       alert("Error: " + error.message)
     } finally {
@@ -180,6 +322,33 @@ export default function RegisterPatientTableForm() {
   return (
     <div className="p-6">
       <h2 className="text-2xl font-bold mb-6">Patient Registration</h2>
+
+      <div className="mb-6 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+        <div className="mb-3 flex items-center justify-between gap-4">
+          <div>
+            <h3 className="text-lg font-semibold text-emerald-950">Payments confirmed — ready for visit</h3>
+            <p className="text-sm text-emerald-800">Finance-approved registrations waiting to be sent to triage.</p>
+          </div>
+          <button type="button" onClick={loadClearedInvoices} className="rounded border border-emerald-300 bg-white px-3 py-2 text-sm text-emerald-800">Refresh</button>
+        </div>
+        {clearedInvoices.length === 0 ? (
+          <p className="text-sm text-emerald-800">No paid registrations are waiting.</p>
+        ) : (
+          <div className="space-y-2">
+            {clearedInvoices.map((invoice) => (
+              <div key={invoice.id} className="flex flex-col justify-between gap-3 rounded-md border bg-white p-3 sm:flex-row sm:items-center">
+                <div>
+                  <p className="font-medium">{invoice.patients?.first_name} {invoice.patients?.last_name}</p>
+                  <p className="text-sm text-gray-600">{invoice.invoice_number} · {invoice.invoice_items?.[0]?.description} · KES {Number(invoice.paid_amount || invoice.total_amount || 0).toLocaleString()}</p>
+                </div>
+                <button type="button" disabled={loadingCleared} onClick={() => createVisitFromPaidInvoice(invoice)} className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50">
+                  Create visit & send to triage
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="mb-6 border p-4 rounded bg-gray-50">
         <h3 className="text-lg font-semibold mb-3">Search Existing Patient</h3>
@@ -216,7 +385,7 @@ export default function RegisterPatientTableForm() {
             disabled={creatingVisitForPatientId !== null}
             className="bg-green-600 text-white p-3 rounded disabled:opacity-50"
           >
-            {creatingVisitForPatientId ? "Creating Visit..." : "Create Visit for Found Patient"}
+            {creatingVisitForPatientId ? "Preparing Bill..." : "Send Found Patient to Billing"}
           </button>
         </div>
       </div>
@@ -242,12 +411,37 @@ export default function RegisterPatientTableForm() {
         <input name="next_of_kin_name" placeholder="Next of Kin Name" value={form.next_of_kin_name} onChange={onChange} className="border p-2 rounded"/>
         <input name="next_of_kin_phone" placeholder="Next of Kin Phone" value={form.next_of_kin_phone} onChange={onChange} className="border p-2 rounded"/>
 
+        <select name="clinic" value={form.clinic} onChange={onChange} className="border p-2 rounded">
+          <option value="GENERAL">General OPD</option>
+          <option value="DENTAL">Dental</option>
+          <option value="MATERNITY">Maternity</option>
+          <option value="ANC">Antenatal clinic</option>
+          <option value="POSTNATAL">Postnatal clinic</option>
+        </select>
+
+        <select name="payment_type" value={form.payment_type} onChange={onChange} className="border p-2 rounded">
+          <option value="CASH">Cash</option>
+          <option value="MPESA">M-Pesa</option>
+          <option value="SHA">SHA</option>
+          <option value="MAKL">MAKL</option>
+          <option value="PRIVATE_INSURANCE">Private insurance</option>
+        </select>
+
+        <select name="service_id" value={form.service_id} onChange={onChange} className="col-span-2 border p-2 rounded" required>
+          <option value="">Select consultation or service</option>
+          {services.map((service) => (
+            <option key={service.id} value={service.id}>
+              {service.name} — KES {Number(service.price || 0).toLocaleString()}
+            </option>
+          ))}
+        </select>
+
         <button
           onClick={registerPatient}
           disabled={isSubmitting || creatingVisitForPatientId !== null}
           className="col-span-2 bg-blue-600 text-white p-3 rounded mt-4 disabled:opacity-50"
         >
-          {isSubmitting ? "Processing..." : "Register Patient"}
+          {isSubmitting ? "Processing..." : "Complete Registration"}
         </button>
       </div>
     </div>

@@ -446,8 +446,11 @@ export async function generateBillingForDentalAction(
     // Check if an invoice already exists for this visit
     let { data: existingInvoice } = await supabase
       .from('invoices')
-      .select('*')
+      .select('*, invoice_items!inner(item_type)')
       .eq('visit_id', visitId || dentalVisitId)
+      .eq('status', 'unpaid')
+      .eq('invoice_items.item_type', 'dental_procedure')
+      .limit(1)
       .maybeSingle();
 
     let invoice;
@@ -480,7 +483,8 @@ export async function generateBillingForDentalAction(
         .from('invoices')
         .update({
           total_amount: newTotal,
-          balance: newTotal
+          balance: Math.max(0, newTotal - Number(existingInvoice.paid_amount || 0)),
+          status: newTotal > Number(existingInvoice.paid_amount || 0) ? 'unpaid' : 'paid'
         })
         .eq('id', existingInvoice.id)
         .select()

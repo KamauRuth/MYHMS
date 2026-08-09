@@ -1,164 +1,52 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { CircleUser, LogOut, Settings } from "lucide-react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { createClient } from "@/lib/supabase/client"
+
+import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Button } from "@/components/ui/button"
-import { CircleUser, LogOut, Settings } from "lucide-react"
+import { roleLabels, type CurrentStaff } from "@/lib/auth/roles"
+import { createClient } from "@/lib/supabase/client"
+import { endBrowserSession } from "@/lib/auth/browser-session"
 
-interface UserProfile {
-  email: string
-  role: string
-}
-
-export function HeaderProfile() {
+export function HeaderProfile({ staff }: { staff: CurrentStaff }) {
   const router = useRouter()
-  const supabase = createClient()
-  const [profile, setProfile] = useState<UserProfile | null>(null)
-  const [loading, setLoading] = useState(true)
+  const fullName = `${staff.firstName} ${staff.lastName}`.trim()
 
-  useEffect(() => {
-    const loadUserProfile = async () => {
-      try {
-        if (!supabase?.auth || typeof supabase.auth.getUser !== "function") {
-          console.error("Supabase auth client is not initialized")
-          setLoading(false)
-          return
-        }
-
-        // Add timeout handler
-        const timeoutId = setTimeout(() => {
-          console.warn("Auth request timed out, skipping profile load")
-          setLoading(false)
-        }, 5000)
-
-        const { data: userData, error: userError } = await supabase.auth.getUser()
-        clearTimeout(timeoutId)
-
-        if (userError || !userData.user) {
-          setLoading(false)
-          return
-        }
-
-        // Get user's profile from database
-        const { data: profileData, error: profileError } = await supabase
-          .from("profiles")
-          .select("role")
-          .eq("id", userData.user.id)
-          .maybeSingle()
-
-        if (!profileError && userData.user.email) {
-          setProfile({
-            email: userData.user.email,
-            role: profileData?.role || "USER"
-          })
-        }
-      } catch (err) {
-        console.error("Failed to load profile:", err)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    loadUserProfile()
-  }, [])
-
-  const handleLogout = async () => {
-    if (!supabase?.auth || typeof supabase.auth.signOut !== "function") {
-      router.push("/sign-in")
-      return
-    }
-
-    await supabase.auth.signOut()
-    router.push("/sign-in")
-  }
-
-  if (loading || !profile) {
-    return (
-      <Button variant="ghost" size="icon">
-        <CircleUser className="h-5 w-5" />
-      </Button>
-    )
-  }
-
-  // Get role color and display name
-  const getRoleColor = (role: string) => {
-    const roleColors: { [key: string]: string } = {
-      ADMIN: "text-red-600",
-      DOCTOR: "text-blue-600",
-      NURSE: "text-green-600",
-      LAB: "text-orange-600",
-      PHARMACY: "text-purple-600",
-      RECEPTION: "text-cyan-600",
-      FINANCE: "text-indigo-600"
-    }
-    return roleColors[role] || "text-gray-600"
-  }
-
-  const getRoleLabel = (role: string) => {
-    const labels: { [key: string]: string } = {
-      ADMIN: "Administrator",
-      DOCTOR: "Doctor",
-      NURSE: "Nurse",
-      LAB: "Lab Technician",
-      PHARMACY: "Pharmacist",
-      RECEPTION: "Reception",
-      FINANCE: "Finance Officer"
-    }
-    return labels[role] || role
+  async function handleLogout() {
+    endBrowserSession()
+    await createClient().auth.signOut()
+    router.replace("/sign-in")
+    router.refresh()
   }
 
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon" className="rounded-full">
-          <CircleUser className="h-5 w-5" />
+          <CircleUser className="size-5" />
           <span className="sr-only">Open user menu</span>
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="flex flex-col space-y-1 py-2">
-          <p className="text-sm font-medium leading-none text-foreground">
-            {profile.email.split("@")[0] || "Staff"}
-          </p>
-          <p className="text-xs leading-none text-muted-foreground">
-            {profile.email}
-          </p>
-          <div className="pt-1">
-            <span className={`inline-block text-xs font-semibold px-2 py-1 rounded-full bg-opacity-10 ${getRoleColor(profile.role)}`}>
-              {getRoleLabel(profile.role)}
-            </span>
-          </div>
+      <DropdownMenuContent align="end" className="w-60">
+        <DropdownMenuLabel>
+          <p className="truncate text-sm font-medium">{fullName}</p>
+          <p className="truncate text-xs font-normal text-muted-foreground">{staff.email}</p>
+          <p className="mt-1 text-xs font-medium text-primary">{roleLabels[staff.role]}</p>
         </DropdownMenuLabel>
-        
         <DropdownMenuSeparator />
-        
-        <DropdownMenuGroup>
-          <DropdownMenuItem asChild className="cursor-pointer">
-            <a href="/settings/account" className="flex items-center gap-2">
-              <Settings className="h-4 w-4" />
-              <span>Settings</span>
-            </a>
-          </DropdownMenuItem>
-        </DropdownMenuGroup>
-
+        <DropdownMenuItem asChild><Link href="/settings/account"><Settings />My account</Link></DropdownMenuItem>
         <DropdownMenuSeparator />
-        
-        <DropdownMenuItem
-          onClick={handleLogout}
-          className="cursor-pointer text-red-600 focus:text-red-600"
-        >
-          <LogOut className="h-4 w-4" />
-          <span>Logout</span>
+        <DropdownMenuItem onSelect={handleLogout} className="cursor-pointer text-destructive focus:text-destructive">
+          <LogOut />Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

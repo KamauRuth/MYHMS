@@ -3,6 +3,7 @@
 import { Dialog } from "@/components/ui/dialog"
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { PAYMENT_STATUS, TRIAGE_STATUS, VISIT_STATUS } from "@/lib/workflows/encounters"
 
 const supabase = createClient()
 
@@ -100,10 +101,10 @@ export default function ViewPatients() {
         visit_type: serviceName,
         clinic: clinic,
         payment_method: form.payment_method,
-        payment_status: "paid",
+        payment_status: servicePrice > 0 ? PAYMENT_STATUS.UNPAID : PAYMENT_STATUS.PAID,
         visit_no: generateVisitNo(),
-        status: "TRIAGE",
-        triage_status: "pending"
+        status: VISIT_STATUS.TRIAGE,
+        triage_status: TRIAGE_STATUS.PENDING
       }).select().single()
 
       if (visitError) throw visitError

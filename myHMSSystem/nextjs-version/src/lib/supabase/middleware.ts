@@ -1,7 +1,8 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { browserSessionCookie } from '@/lib/auth/session'
 
-const public_routes = ['/sign-in', '/forgot-password']
+const publicRoutes = ['/sign-in', '/forgot-password', '/update-password', '/landing', '/auth/logout']
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
@@ -28,28 +29,42 @@ export async function updateSession(request: NextRequest) {
       },
     }
   )
-    const { data: { user } } = await supabase.auth.getUser()
-    const pathname = request.nextUrl.pathname
-    console.log(pathname);
-    
-    const is_public_route = public_routes.includes(pathname)
-
-    if (user && is_public_route) {
-      // user is authenticated but is on a public route, redirect to dashboard
+    const redirectTo = (pathname: string) => {
       const url = request.nextUrl.clone()
-      url.pathname = '/dashboard'
-      return NextResponse.redirect(url)
+      url.pathname = pathname
+      const redirectResponse = NextResponse.redirect(url)
+      supabaseResponse.cookies.getAll().forEach((cookie) => {
+        redirectResponse.cookies.set(cookie.name, cookie.value)
+      })
+      return redirectResponse
+    }
+
+    let { data: { user } } = await supabase.auth.getUser()
+    const pathname = request.nextUrl.pathname
+    const hasBrowserSession = request.cookies.get(browserSessionCookie)?.value === 'active'
+    const isPublicRoute = publicRoutes.some(
+      (route) => pathname === route || pathname.startsWith(`${route}/`)
+    )
+
+    if (user && !hasBrowserSession) {
+      await supabase.auth.signOut()
+      user = null
+    }
+
+    if (
+      user &&
+      hasBrowserSession &&
+      isPublicRoute &&
+      pathname !== '/landing' &&
+      pathname !== '/auth/logout'
+    ) {
+      // user is authenticated but is on a public route, redirect to dashboard
+      return redirectTo('/home')
     } 
 
-  if (
-    !user &&
-    !is_public_route
-    
-  ) {
+  if (!user && !isPublicRoute) {
     // no user, potentially respond by redirecting the user to the login page
-    const url = request.nextUrl.clone()
-    url.pathname = '/sign-in'
-    return NextResponse.redirect(url)
+    return redirectTo('/sign-in')
   }
 
   // IMPORTANT: You *must* return the supabaseResponse object as it is. If you're

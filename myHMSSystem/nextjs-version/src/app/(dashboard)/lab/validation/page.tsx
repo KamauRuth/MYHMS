@@ -88,7 +88,7 @@ export default function LabValidation() {
       .from("lab_results")
       .update({
         status: "rejected",
-        rejection_reason: reason,
+        comments: `Validation correction required: ${reason}`,
         verified_by: "lab_in_charge",
         verified_at: new Date().toISOString()
       })
@@ -100,17 +100,17 @@ export default function LabValidation() {
       return
     }
 
-    // Update lab request status to cancelled
+    // Return the paid request to result entry for correction.
     const { error: requestError } = await supabase
       .from("lab_requests")
-      .update({ status: "cancelled" })
+      .update({ status: "sample_collected" })
       .eq("id", result.request_id)
 
     if (requestError) {
       console.error("Failed to update request status", requestError)
     }
 
-    alert("Result rejected")
+    alert("Result returned to the testing queue for correction")
     loadPendingResults()
   }
 

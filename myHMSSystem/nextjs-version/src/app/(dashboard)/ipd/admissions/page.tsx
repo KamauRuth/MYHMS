@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { ArrowLeft, Filter } from 'lucide-react'
+import { Filter } from 'lucide-react'
 import { getActiveAdmissions } from '@/lib/ipd/api'
 import { formatDate, getDaysInAdmission, getStatusColor } from '@/lib/ipd/utils'
 import type { AdmissionWithPatient } from '@/lib/ipd/types'
@@ -13,7 +13,6 @@ export default function AdmissionsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [searchTerm, setSearchTerm] = useState('')
-  const [filterStatus, setFilterStatus] = useState<'ALL' | 'ADMITTED' | 'DISCHARGED'>('ADMITTED')
 
   useEffect(() => {
     const fetchData = async () => {
@@ -36,10 +35,6 @@ export default function AdmissionsPage() {
   useEffect(() => {
     let filtered = admissions
 
-    if (filterStatus !== 'ALL') {
-      filtered = filtered.filter((adm) => adm.status === filterStatus)
-    }
-
     if (searchTerm) {
       filtered = filtered.filter(
         (adm) =>
@@ -51,7 +46,7 @@ export default function AdmissionsPage() {
     }
 
     setFilteredAdmissions(filtered)
-  }, [admissions, searchTerm, filterStatus])
+  }, [admissions, searchTerm])
 
   if (loading) {
     return (
@@ -65,14 +60,9 @@ export default function AdmissionsPage() {
     <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
-        <Link href="/ipd" className="text-blue-600 hover:text-blue-800 flex items-center gap-2 mb-4">
-          <ArrowLeft className="h-5 w-5" />
-          Back to Dashboard
-        </Link>
-
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-gray-900">All Admissions</h1>
-          <p className="text-gray-600 mt-2">View and manage patient admissions</p>
+          <h1 className="text-3xl font-bold text-gray-900">Current Inpatients</h1>
+          <p className="text-gray-600 mt-2">Open a patient record to continue clinical care</p>
         </div>
 
         {error && (
@@ -83,7 +73,7 @@ export default function AdmissionsPage() {
 
         {/* Filters */}
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4 mb-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">Search</label>
               <input
@@ -93,18 +83,6 @@ export default function AdmissionsPage() {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
               />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Status</label>
-              <select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value as any)}
-                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              >
-                <option value="ALL">All Statuses</option>
-                <option value="ADMITTED">Active Admissions</option>
-                <option value="DISCHARGED">Discharged</option>
-              </select>
             </div>
           </div>
         </div>
@@ -116,11 +94,7 @@ export default function AdmissionsPage() {
               {filteredAdmissions.length} admission(s)
             </h2>
             <span className="text-sm text-gray-600">
-              {filterStatus === 'ALL'
-                ? 'All'
-                : filterStatus === 'ADMITTED'
-                  ? 'Active'
-                  : 'Discharged'}
+              Active admissions
             </span>
           </div>
 

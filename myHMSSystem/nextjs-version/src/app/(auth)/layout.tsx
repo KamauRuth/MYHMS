@@ -1,8 +1,8 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Authentication - ShadcnStore",
-  description: "Sign in to your account or create a new one",
+  title: "Sign in",
+  description: "Secure staff access to LifePoint Hospital Management System",
 };
 
 export default function AuthLayout({

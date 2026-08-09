@@ -84,6 +84,8 @@ export default function LabResults() {
   useEffect(() => {
     if (requestId) {
       loadRequest()
+    } else {
+      setLoading(false)
     }
   }, [requestId])
 
@@ -365,7 +367,9 @@ export default function LabResults() {
       console.error("Failed to save results", error)
       alert("Could not save results")
     } else {
+      await supabase.from("lab_requests").update({ status: "awaiting_validation" }).eq("id", requestId)
       alert("Results saved for verification")
+      router.push("/lab/validation")
     }
     setSaving(false)
   }
@@ -388,6 +392,7 @@ export default function LabResults() {
   }
 
   if (loading) return <p className="p-6">Loading...</p>
+  if (!requestId) return <div className="p-8 text-center"><p className="font-semibold text-slate-800">Select a paid request first</p><p className="mt-1 text-sm text-slate-500">Result entry follows sample collection in the paid queue.</p><button onClick={() => router.push("/lab/lab-queue")} className="mt-4 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white">Open paid requests</button></div>
   if (!request) return <p className="p-6">Request not found.</p>
 
   return (
@@ -404,10 +409,10 @@ export default function LabResults() {
 
           <div className="flex flex-wrap gap-2">
             <button
-              onClick={() => router.push("/lab/lab-requests")}
+              onClick={() => router.push("/lab/lab-queue")}
               className="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50"
             >
-              Back to Requests
+              Back to Paid Queue
             </button>
             <button
               onClick={() => router.push("/lab/validation")}
