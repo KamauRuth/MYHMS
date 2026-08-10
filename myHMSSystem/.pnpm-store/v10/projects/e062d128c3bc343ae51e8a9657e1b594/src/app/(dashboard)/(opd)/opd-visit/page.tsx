@@ -1,0 +1,1607 @@
+"use client"
+
+import { useCallback, useEffect, useState } from "react"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
+import { createClient } from "@/lib/supabase/client"
+import { generateBillingForOPDAction } from "@/app/actions/billingActions"
+import { VISIT_STATUS } from "@/lib/workflows/encounters"
+
+
+const supabase = createClient()
+
+// Danger diagnosis keywords
+const DANGER_KEYWORDS = [
+  "malaria",
+  "typhoid",
+  "meningitis",
+  "sepsis",
+  "pneumonia",
+  "tuberculosis",
+  "cholera",
+  "stroke",
+  "myocardial",
+  "hemorrhage",
+]
+
+// ICD → Suggested labs mapping
+const ICD_LAB_MAP: Record<string, string[]> = {
+  malaria: ["Malaria smear", "RDT malaria"],
+  typhoid: ["Widal test", "Blood culture"],
+  pneumonia: ["Chest X-ray", "Full blood count"],
+  tuberculosis: ["GeneXpert", "Sputum AFB"],
+  cholera: ["Stool culture", "Electrolytes"],
+}
+
+const localDiagnosisFallback = (query: string) => {
+  const q = query.trim().toLowerCase()
+  if (!q) return []
+
+  return Object.keys(ICD_LAB_MAP)
+    .filter((key) => key.includes(q))
+    .slice(0, 8)
+    .map((key) => ({
+      code: `LOCAL-${key.toUpperCase()}`,
+      title: key.charAt(0).toUpperCase() + key.slice(1),
+    }))
+}
+
+const parseResultRows = (value: any) => {
+  if (!value) return []
+  if (Array.isArray(value)) return value
+
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return []
+  }
+}
+
+const formatDateTime = (value?: string | null) => {
+  if (!value) return "—"
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString()
+}
+
+const getEstimatedTurnaroundMinutes = (testName = "") => {
+  const name = testName.toLowerCase()
+  if (name.includes("histology") || name.includes("biopsy")) return 5 * 24 * 60
+  if (name.includes("culture")) return 48 * 60
+  if (name.includes("genexpert") || name.includes("gene xpert")) return 2 * 60
+  if (name.includes("full blood") || name.includes("fbc") || name.includes("cbc")) return 60
+  if (name.includes("malaria") || name.includes("rdt")) return 60
+  if (name.includes("electrolyte") || name.includes("chemistry") || name.includes("liver") || name.includes("renal")) return 2 * 60
+  return 2 * 60
+}
+
+const formatDuration = (minutes: number) => {
+  const safeMinutes = Math.max(0, Math.round(minutes))
+  if (safeMinutes < 60) return `${safeMinutes} min`
+  const hours = Math.floor(safeMinutes / 60)
+  const remainingMinutes = safeMinutes % 60
+  if (hours < 24) return remainingMinutes ? `${hours} hr ${remainingMinutes} min` : `${hours} hr`
+  const days = Math.floor(hours / 24)
+  const remainingHours = hours % 24
+  return remainingHours ? `${days} day ${remainingHours} hr` : `${days} day`
+}
+
+const getLatestLabResult = (labRequest: any) => {
+  const items = Array.isArray(labRequest?.lab_results) ? labRequest.lab_results : []
+  if (items.length === 0) return null
+
+  return [...items].sort((a, b) => {
+    const aTime = new Date(a.released_at || a.verified_at || a.entered_at || a.created_at || 0).getTime()
+    const bTime = new Date(b.released_at || b.verified_at || b.entered_at || b.created_at || 0).getTime()
+    return bTime - aTime
+  })[0]
+}
+
+export default function OPDVisit() {
+    const searchParams = useSearchParams()
+    const visitId = searchParams.get("visitId")
+    const router = useRouter()
+
+  // LOADING STATE
+  const [loading, setLoading] = useState(true)
+  const [closing, setClosing] = useState(false)
+
+  // SEARCH STATE
+  const [search, setSearch] = useState("")
+
+  // VISIT DATA
+  const [visit, setVisit] = useState<any>(null)
+  const [patient, setPatient] = useState<any>(null)
+  const [triage, setTriage] = useState<any>(null)
+  const [userDepartmentId, setUserDepartmentId] = useState<string | null>(null) // Department UUID from departments table
+
+  // CONSULTATION
+  const [chiefComplaint, setChiefComplaint] = useState("")
+  const [historyOfPresentIllness, setHPI] = useState("")
+  const [examination, setExamination] = useState("")
+  const [diagnosis, setDiagnosis] = useState("")
+  const [notes, setNotes] = useState("")
+
+  // ICD
+  const [icdResults, setIcdResults] = useState<any[]>([])
+  const [selectedICD, setSelectedICD] = useState<any>(null)
+  const [activeIndex, setActiveIndex] = useState(-1)
+  const [diagnosisLocked, setDiagnosisLocked] = useState(false)
+  const [suggestedLabs, setSuggestedLabs] = useState<string[]>([])
+
+  // LABS
+  const [labs, setLabs] = useState([""])
+  const [labTests, setLabTests] = useState<any[]>([])
+  const [labRequests, setLabRequests] = useState<any[]>([])
+  const [labRequestError, setLabRequestError] = useState("")
+  const [hasPendingLabs, setHasPendingLabs] = useState(false)
+  const [labClock, setLabClock] = useState(Date.now())
+
+  const isDangerDiagnosis = (title = "") =>
+    DANGER_KEYWORDS.some(k => title.toLowerCase().includes(k))
+
+  const filteredLabTests = labTests?.filter((test) =>
+    test.test_name.toLowerCase().includes(search.toLowerCase()))
+
+  // PHARMACY
+  const [drugs, setDrugs] = useState([{ drug_id: "", quantity: "", frequency: "", route: "oral", specialInstructions: "" }])
+  const [departments, setDepartments] = useState<any[]>([])
+  const [selectedDepartmentId, setSelectedDepartmentId] = useState<string>("")
+  const [allDrugs, setAllDrugs] = useState<any[]>([]) 
+
+
+  // THEATRE / SURGERY
+  const [showBooking, setShowBooking] = useState(false)
+  const [procedure, setProcedure] = useState("")
+  const [urgency, setUrgency] = useState("ELECTIVE")
+  const [preferredDate, setPreferredDate] = useState("")
+  const [estimatedDuration, setEstimatedDuration] = useState("")
+
+  // BILLING
+  const [consultationFee, setConsultationFee] = useState(500)
+
+
+
+  const generateBookingId = () =>
+    `LPH-OT-${Math.floor(1000 + Math.random() * 9000)}`
+
+  // User department loading is handled through selectedDepartmentId state
+  // which is set via the prescription department selector dropdown
+
+  // =========================
+  // LOAD OPD DEPARTMENT UUID FROM DEPARTMENTS TABLE
+  // =========================
+  useEffect(() => {
+    const loadDepartmentUUID = async () => {
+      try {
+        const { data: userData, error: userError } = await supabase.auth.getUser()
+        if (userError || !userData.user) return
+
+        // Get user's role from profiles table
+        const { data: profile, error: profileError } = await supabase
+          .from("profiles")
+          .select("role")
+          .eq("id", userData.user.id)
+          .maybeSingle()
+
+        if (!profileError && profile?.role) {
+          // Map role to department name (must match department names in your departments table)
+          const roleToDepartmentName: { [key: string]: string } = {
+            "DOCTOR": "OPD",
+            "NURSE": "OPD",
+            "LAB": "Laboratory",
+            "PHARMACY": "Pharmacy",
+            "RECEPTION": "Reception",
+            "FINANCE": "Finance",
+            "ADMIN": "OPD"
+          }
+
+          const departmentName = roleToDepartmentName[profile.role] || "OPD"
+          
+          // Fetch the department UUID from departments table
+          const { data: dept, error: deptError } = await supabase
+            .from("departments")
+            .select("id")
+            .eq("name", departmentName)
+            .eq("is_active", true)
+            .maybeSingle()
+
+          if (!deptError && dept?.id) {
+            setUserDepartmentId(dept.id)
+          } else {
+            console.warn(`Department "${departmentName}" not found or inactive in database`)
+          }
+        }
+      } catch (err) {
+        console.error("Failed to load department UUID:", err)
+      }
+    }
+
+    loadDepartmentUUID()
+  }, [])
+
+  // =========================
+  // LOAD VISIT + TRIAGE
+  // =========================
+  useEffect(() => {
+    const load = async () => {
+      const { data: visitData, error: visitError } = await supabase
+        .from("visits")
+        .select(`
+          id,
+          visit_no,
+          status,
+          patient:patients (id, first_name, last_name)
+        `)
+        .eq("id", visitId)
+        .single()
+
+      if (visitError || !visitData) {
+        alert("Visit not found")
+        router.push("/opd-queue")
+        return
+      }
+
+      if (visitData.status === VISIT_STATUS.WAITING_DOCTOR) {
+        const { error: statusError } = await supabase
+          .from("visits")
+          .update({ status: VISIT_STATUS.IN_PROGRESS })
+          .eq("id", visitId)
+          .eq("status", VISIT_STATUS.WAITING_DOCTOR)
+
+        if (!statusError) visitData.status = VISIT_STATUS.IN_PROGRESS
+      }
+
+      const { data: triageData } = await supabase
+        .from("triage")
+        .select("*")
+        .eq("visit_id", visitId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      setVisit(visitData)
+      setPatient(visitData.patient)
+      setTriage(triageData)
+      setLoading(false)
+    }
+    load()
+  }, [visitId, router])
+
+  // LOAD LAB REQUESTS.
+
+  useEffect(() => {
+  const fetchLabs = async () => {
+    const { data, error } = await supabase
+      .from("lab_test_master")
+      .select("id, test_name, price" )
+
+    if (!error) {
+      setLabTests(data)
+    }
+  }
+
+  fetchLabs()
+}, [])
+
+  // =========================
+  // LOAD PHARMACY DRUGS
+  // =========================
+  useEffect(() => {
+    const fetchDrugs = async () => {
+      try {
+        const { data, error } = await supabase
+          .from("drugs")
+          .select("id, drug_name, generic_name, reorder_level")
+          .eq("is_active", true)
+          .order("drug_name", { ascending: true })
+
+        if (!error && data) {
+          setAllDrugs(data)
+        }
+      } catch (err) {
+        console.error("Failed to load drugs", err)
+      }
+    }
+
+    fetchDrugs()
+  }, [])
+
+  // =========================
+  // LOAD LAB REQUESTS
+  // =========================
+useEffect(() => {
+
+  if (!visitId) return
+
+  const load = async () => {
+
+    try {
+
+      const { data: visitData, error: visitError } = await supabase
+        .from("visits")
+        .select(`
+          id,
+          visit_no,
+          patient:patients (
+            id,
+            first_name,
+            last_name
+          )
+        `)
+        .eq("id", visitId)
+        .single()
+
+      if (visitError || !visitData) {
+        alert("Visit not found")
+        router.push("/(opd)/opd-queue")
+        return
+      }
+
+      const { data: triageData } = await supabase
+        .from("triage")
+        .select("*")
+        .eq("visit_id", visitId)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle()
+
+      setVisit(visitData)
+      setPatient(visitData.patient)
+      setTriage(triageData)
+
+    } catch (err) {
+      console.error(err)
+      alert("Failed to load visit")
+    }
+
+    setLoading(false)
+  }
+
+  load()
+
+}, [visitId])
+
+  const loadLabRequests = useCallback(async () => {
+      if (!visitId) return
+      setLabRequestError("")
+      const { data, error } = await supabase
+        .from("lab_requests")
+        .select(`
+          id,
+          visit_id,
+          test_id,
+          status,
+          payment_status,
+          created_at,
+          lab_test_master (
+            id,
+            test_name
+          ),
+          lab_results (
+            id,
+            status,
+            results,
+            comments,
+            entered_at,
+            verified_at,
+            released_at,
+            created_at
+          )
+        `)
+        .eq("visit_id", visitId)
+        .order("created_at", { ascending: false })
+
+      if (error) {
+        console.error("Failed to load lab requests:", error)
+        setLabRequestError(error.message || "Unable to load lab requests")
+        return
+      }
+
+      const requests = data || []
+      setLabRequests(requests)
+
+      const waitingForReview = requests.some((request: any) => {
+        const latestResult = getLatestLabResult(request)
+        if (!latestResult) return true
+
+        const status = String(latestResult.status || "").toLowerCase()
+        return !["released", "approved"].includes(status)
+      })
+
+      setHasPendingLabs(waitingForReview)
+      setLabClock(Date.now())
+  }, [visitId])
+
+  useEffect(() => {
+    if (!visitId) return
+    loadLabRequests()
+    const interval = setInterval(loadLabRequests, 10000)
+    return () => clearInterval(interval)
+  }, [visitId, loadLabRequests])
+  // =========================
+  // ICD-11 SUGGESTIONS
+  // =========================
+useEffect(() => {
+  if (diagnosisLocked || diagnosis.trim().length < 3) {
+    setIcdResults([])
+    return
+  }
+
+  const controller = new AbortController()
+
+  const timer = setTimeout(async () => {
+    try {
+      const res = await fetch(`/api/icd11/suggest?q=${encodeURIComponent(diagnosis)}`, {
+        signal: controller.signal,
+      })
+
+      if (!res.ok) {
+        setIcdResults(localDiagnosisFallback(diagnosis))
+        return
+      }
+
+      const data = await res.json()
+      setIcdResults(Array.isArray(data) ? data.slice(0, 8) : [])
+
+    } catch (err: any) {
+      if (err?.name === "AbortError") return
+      setIcdResults(localDiagnosisFallback(diagnosis))
+      console.warn("ICD suggestion fetch failed; showing local suggestions")
+    }
+  }, 400)
+
+  return () => {
+    clearTimeout(timer)
+    controller.abort()
+  }
+
+}, [diagnosis, diagnosisLocked])
+
+const handleDiagnosisKeyDown = (e: any) => {
+  if (icdResults.length === 0) return
+    if (e.key === "ArrowDown") {
+        e.preventDefault()
+        setActiveIndex(i => (i + 1) % icdResults.length)
+    } else if (e.key === "ArrowUp") {
+        e.preventDefault()
+        setActiveIndex(i => (i - 1 + icdResults.length) % icdResults.length)
+    } else if (e.key === "Enter") {
+        e.preventDefault()
+        const selected = icdResults[activeIndex]
+        if (selected) selectedICD(selected)
+    }  
+} 
+
+  const selectDiagnosis = async (r: any) => {
+    setDiagnosis(r.title)
+    setSelectedICD(r)
+    setDiagnosisLocked(true)
+    setIcdResults([])
+    setActiveIndex(-1)
+
+    const key = Object.keys(ICD_LAB_MAP).find(k =>
+      r.title.toLowerCase().includes(k)
+    )
+    if (key) setSuggestedLabs(ICD_LAB_MAP[key])
+
+    if (isDangerDiagnosis(r.title) && triage?.severity !== "HIGH") {
+      await supabase
+        .from("triage")
+        .update({ severity: "HIGH" })
+        .eq("visit_id", visitId)
+
+      setTriage((t: any) => ({ ...t, severity: "HIGH" }))
+    }
+  }
+
+  // =========================
+  // ACTIONS
+  // =========================
+  async function saveConsultation() {
+
+  if (!visit?.id) {
+    alert("Visit not found")
+    return
+  }
+
+  if (!selectedICD) {
+    alert("Select diagnosis")
+    return
+  }
+
+  const icdCode = selectedICD.code
+  const diagnosisName = selectedICD.title
+
+  // 1️⃣ Check if diagnosis already exists locally
+  const { data: existing } = await supabase
+    .from("diagnoses")
+    .select("*")
+    .eq("icd11_code", icdCode)
+    .maybeSingle()
+
+  let diagnosisId = existing?.id
+
+  // 2️⃣ If not → insert new diagnosis
+  if (!diagnosisId) {
+    const { data: newDiag, error } = await supabase
+      .from("diagnoses")
+      .insert({
+        icd11_code: icdCode,
+        diagnosis_name: diagnosisName,
+        full_data: selectedICD
+      })
+      .select()
+      .single()
+
+    if (error) {
+      alert(error.message)
+      return
+    }
+
+    diagnosisId = newDiag.id
+  }
+
+  // 3️⃣ Save consultation
+  const { error: consultError } = await supabase
+    .from("consultations")
+    .insert({
+      visit_id: visit.id,
+      notes: notes ?? null
+    })
+
+  if (consultError) {
+    alert(consultError.message)
+    return
+  }
+
+  // 4️⃣ Link diagnosis to visit
+  const { error: visitDiagError } = await supabase
+    .from("visit_diagnoses")
+    .insert({
+      visit_id: visit.id,
+      diagnosis_id: diagnosisId,
+      diagnosis_type: "PRIMARY"
+    })
+
+  if (visitDiagError) {
+    alert(visitDiagError.message)
+    return
+  }
+
+  alert("Consultation & ICD-11 diagnosis saved successfully")
+}
+
+ async function sendLab() {
+  try {
+    if (!visit?.id) {
+      alert("Visit information not loaded. Please reload the page.");
+      return;
+    }
+
+    // ✅ ENSURE PATIENT DATA IS AVAILABLE
+    if (!visit.patient || !visit.patient.id) {
+      alert("Patient information is missing. Please reload the visit.");
+      return;
+    }
+
+    const selectedTests = labs.filter(id => id);
+    if (selectedTests.length === 0) {
+      alert("Please select at least one lab test");
+      return;
+    }
+
+    for (const selectedTestId of labs) {
+
+      if (!selectedTestId) continue;
+
+      // 1️⃣ Fetch test details
+      const { data: test, error } = await supabase
+        .from("lab_test_master")
+        .select("id, test_name, price")
+        .eq("id", selectedTestId)
+        .single();
+
+      if (error || !test) {
+        console.error("Test fetch error:", error);
+        alert(`Failed to load test details`);
+        continue;
+      }
+
+    // 2️⃣ Prevent duplicate requests
+    const { data: existing } = await supabase
+      .from("lab_requests")
+      .select("id")
+      .eq("visit_id", visit.id)
+      .eq("test_id", test.id)
+      .maybeSingle();
+
+    if (existing) {
+      console.log(`Lab test ${test.id} already requested`);
+      continue;
+    }
+
+    // 3️⃣ Get invoice for this visit
+    let { data: invoice } = await supabase
+      .from("invoices")
+      .select("*, invoice_items!inner(item_type)")
+      .eq("visit_id", visit.id)
+      .eq("status", "unpaid")
+      .eq("invoice_items.item_type", "lab_test")
+      .limit(1)
+      .maybeSingle();
+
+    // 4️⃣ Create invoice if none exists
+    if (!invoice) {
+
+      const { data: newInvoice, error: invoiceError } = await supabase
+        .from("invoices")
+        .insert({
+          visit_id: visit.id,
+          patient_id: visit.patient.id,
+          invoice_number: `LAB-${Date.now()}`,
+          status: "unpaid",
+          total_amount: 0,
+          paid_amount: 0,
+          balance: 0
+        })
+        .select()
+        .single();
+
+      if (invoiceError) {
+        console.error("Invoice creation error:", {
+          message: invoiceError.message,
+          details: invoiceError.details,
+          hint: invoiceError.hint,
+          visitId: visit.id,
+          patientId: visit.patient?.id
+        });
+        continue;
+      }
+
+      invoice = newInvoice;
+    } else if (!invoice.patient_id) {
+      // ✅ FIX: Update invoice if patient_id is missing
+      const { error: updatePatientError } = await supabase
+        .from("invoices")
+        .update({ patient_id: visit.patient.id })
+        .eq("id", invoice.id);
+
+      if (!updatePatientError) {
+        invoice.patient_id = visit.patient.id;
+      } else {
+        console.error("Failed to update patient_id on invoice:", updatePatientError);
+      }
+    }
+
+    // 5️⃣ Create lab request
+    const { data: labRequest, error: requestError } = await supabase
+      .from("lab_requests")
+      .insert({
+        visit_id: visit.id,
+        test_id: test.id,
+        lab_amount: test.price,
+        department_id: userDepartmentId || null,
+        status: "pending"
+      })
+      .select()
+      .single();
+
+    if (requestError) {
+      console.error("Lab request creation error:", {
+        message: requestError.message,
+        details: requestError.details,
+        hint: requestError.hint,
+        visitId: visit.id,
+        testId: test.id,
+        departmentId: userDepartmentId
+      });
+      alert(`Failed to create lab request: ${requestError.message || "Unknown error"}`);
+      continue;
+    }
+
+    // 6️⃣ Add item to invoice
+    const { error: itemError } = await supabase
+      .from("invoice_items")
+      .insert({
+        invoice_id: invoice.id,
+        item_type: "lab_test",
+        item_id: labRequest.id,
+        description: test.test_name,
+        quantity: 1,
+        unit_price: test.price,
+        total_price: test.price
+      });
+
+    if (itemError) {
+      console.error("Invoice item creation error:", {
+        message: itemError.message,
+        details: itemError.details,
+        invoiceId: invoice.id,
+        testId: test.id
+      });
+      continue;
+    }
+
+    // 7️⃣ Update invoice total and balance
+    const { data: items } = await supabase
+      .from("invoice_items")
+      .select("total_price")
+      .eq("invoice_id", invoice.id);
+
+    const newTotal = (items || []).reduce(
+      (sum: number, item: { total_price?: number | null }) => sum + (item.total_price || 0),
+      0
+    );
+
+    const alreadyPaid = Number(invoice.paid_amount || 0);
+    const outstandingBalance = Math.max(0, newTotal - alreadyPaid);
+    const { error: updateError } = await supabase
+      .from("invoices")
+      .update({
+        total_amount: newTotal,
+        balance: outstandingBalance,
+        status: outstandingBalance > 0 ? "unpaid" : "paid"
+      })
+      .eq("id", invoice.id);
+
+    if (updateError) {
+      console.error("Invoice update error:", {
+        message: updateError.message,
+        invoiceId: invoice.id
+      });
+      continue;
+    }
+
+    console.log(`Lab request created and billed: ${test.test_name}`);
+  }
+
+  await loadLabRequests();
+  setLabs([""])
+  alert("Lab requests created and added to billing.");
+  } catch (err) {
+    console.error("Unexpected error in sendLab:", err);
+    alert("An unexpected error occurred while creating lab requests");
+  }
+}
+ const sendPrescription = async () => {
+  try {
+    // Validate form
+    const clean = drugs.filter(d => d.drug_id && d.quantity)
+    if (!clean.length) return alert("Add at least one medication")
+
+    if (!selectedDepartmentId) {
+      return alert("Select a department for this prescription")
+    }
+
+    if (!visit?.id || !patient?.id) {
+      return alert("Visit or patient information missing")
+    }
+
+    // Generate unique prescription number
+    const prescriptionNumber = `RX-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`
+
+    // Get current user
+    const { data: userData } = await supabase.auth.getUser()
+    const userId = userData.user?.id
+
+    // 1️⃣ Create prescription record
+    const { data: prescriptionData, error: prescError } = await supabase
+      .from("prescriptions")
+      .insert({
+        prescription_number: prescriptionNumber,
+        patient_id: patient.id,
+        visit_id: visit.id,
+        prescribed_by: userId,
+        department: "opd", // Source department is OPD
+        source_type: "opd_visit",
+        source_id: visit.id,
+        status: "pending",
+        notes: `Prescribed at OPD visit from department: ${selectedDepartmentId}`
+      })
+      .select()
+      .single()
+
+    if (prescError || !prescriptionData) {
+      console.error("Prescription creation error:", prescError)
+      return alert(`Failed to create prescription: ${prescError?.message}`)
+    }
+
+    // 2️⃣ Create prescription items
+    const prescriptionItems = clean.map(d => ({
+      prescription_id: prescriptionData.id,
+      drug_id: d.drug_id,
+      quantity_prescribed: d.quantity,
+      frequency: d.frequency || "As directed",
+      route: d.route || "Oral", // From drug form if available
+      special_instructions: d.specialInstructions || null,
+      status: "pending"
+    }))
+
+    const { error: itemsError } = await supabase
+      .from("prescription_items")
+      .insert(prescriptionItems)
+
+    if (itemsError) {
+      console.error("Prescription items error:", itemsError)
+      // Try to delete the prescription if items fail
+      await supabase.from("prescriptions").delete().eq("id", prescriptionData.id)
+      return alert(`Failed to add prescription items: ${itemsError.message}`)
+    }
+
+    const drugIds = clean.map((item) => item.drug_id)
+    const { data: priceRows, error: priceError } = await supabase
+      .from("drug_batches")
+      .select("drug_id,selling_price,expiry_date")
+      .in("drug_id", drugIds)
+      .gt("quantity_in_stock", 0)
+      .order("expiry_date", { ascending: true })
+
+    if (priceError) {
+      alert(`Prescription created, but Pharmacy billing needs attention: ${priceError.message}`)
+      return
+    }
+
+    const pharmacyLines = clean.map((item) => {
+      const batch = (priceRows || []).find((row: any) => row.drug_id === item.drug_id)
+      const drug = allDrugs.find((entry: any) => entry.id === item.drug_id)
+      return {
+        item_type: "pharmacy_drug",
+        item_id: prescriptionData.id,
+        description: `${drug?.drug_name || "Medication"} · ${item.frequency || "As directed"}`,
+        quantity: Number(item.quantity),
+        unit_price: Number(batch?.selling_price || 0),
+        total_price: Number(item.quantity) * Number(batch?.selling_price || 0),
+      }
+    })
+
+    if (pharmacyLines.some((line) => line.unit_price <= 0)) {
+      alert("Prescription created, but one or more medicines have no active selling price. Pharmacy must price them before payment.")
+      return
+    }
+
+    const pharmacyTotal = pharmacyLines.reduce((sum, line) => sum + line.total_price, 0)
+    const { data: pharmacyInvoice, error: pharmacyInvoiceError } = await supabase
+      .from("invoices")
+      .insert({ patient_id: patient.id, visit_id: visit.id, invoice_number: `PHARM-${Date.now()}`, status: "unpaid", total_amount: pharmacyTotal, paid_amount: 0, balance: pharmacyTotal })
+      .select()
+      .single()
+
+    if (pharmacyInvoiceError || !pharmacyInvoice) {
+      alert(`Prescription created, but Pharmacy invoice failed: ${pharmacyInvoiceError?.message || "Unknown error"}`)
+      return
+    }
+
+    const { error: pharmacyItemsError } = await supabase.from("invoice_items").insert(
+      pharmacyLines.map((line) => ({ ...line, invoice_id: pharmacyInvoice.id }))
+    )
+
+    if (pharmacyItemsError) {
+      alert(`Prescription created, but Pharmacy invoice items failed: ${pharmacyItemsError.message}`)
+      return
+    }
+
+    // 3️⃣ Success - Reset form and notify
+    alert(`Prescription sent to Pharmacy billing.\nRx #: ${prescriptionNumber}\nAmount: KES ${pharmacyTotal.toLocaleString()}`)
+    setDrugs([{ drug_id: "", quantity: "", frequency: "", route: "", specialInstructions: "" }])
+    
+  } catch (err: any) {
+    console.error("Error in sendPrescription:", err)
+    alert(`Failed to send prescription: ${err.message}`)
+  }
+}
+  const closeConsultation = async () => {
+    if (!selectedICD) return alert("Diagnosis required before closing consultation")
+    setClosing(true)
+
+    try {
+      // Silently create invoice in background
+      if (!visitId) {
+        alert("Visit not found")
+        return
+      }
+
+      await generateBillingForOPDAction(visitId, consultationFee)
+
+      const { error: consultError } = await supabase
+        .from("consultations")
+        .update({ status: "CLOSED", closed_at: new Date().toISOString() })
+        .eq("visit_id", visitId)
+
+      if (consultError) throw consultError
+
+      const { error: visitError } = await supabase
+        .from("visits")
+        .update({ status: "COMPLETED" })
+        .eq("id", visitId)
+
+      if (visitError) throw visitError
+
+      alert("✅ Consultation closed successfully")
+      router.push("/opd")
+    } catch (error: any) {
+      console.error("[ERROR]", error)
+      alert("Error: " + (error.message || "Failed to close consultation"))
+      setClosing(false)
+    }
+  }
+
+  const admitToIPD = async () => {
+    if (!selectedICD) return alert("Diagnosis required before admission")
+    setClosing(true)
+
+    await supabase.from("ipd_admissions").insert({
+      visit_id: visitId,
+      patient_id: patient.id,
+      admitted_at: new Date().toISOString(),
+      status: "ACTIVE",
+    })
+
+    await supabase
+      .from("consultations")
+      .update({ status: "CLOSED", closed_at: new Date().toISOString() })
+      .eq("visit_id", visitId)
+
+    await supabase
+      .from("visits")
+      .update({ status: "ADMITTED" })
+      .eq("id", visitId)
+
+    alert("Patient admitted to IPD")
+    router.push("/ipd")
+  }
+
+  const bookForSurgery = async () => {
+    if (!selectedICD || !procedure || !preferredDate) {
+      alert("Diagnosis, procedure, and preferred date are required")
+      return
+    }
+
+    try {
+      // Get theatre procedure cost from database
+      const { data: procedureData } = await supabase
+        .from("theatre_procedures")
+        .select("cost")
+        .eq("name", procedure)
+        .maybeSingle()
+
+      const procedureCost = procedureData?.cost || 5000 // Default theatre cost: 5000 KES
+
+      // 1️⃣ Create theatre booking
+      const { data: booking, error } = await supabase.from("theatre_bookings").insert({
+        booking_id: generateBookingId(),
+        patient_id: patient.id,
+        visit_id: visitId,
+        source: "OPD",
+        procedure_name: procedure,
+        urgency,
+        preferred_date: preferredDate,
+        estimated_duration_minutes: parseInt(estimatedDuration) || 0,
+        status: "BOOKED",
+      }).select().single()
+
+      if (error) return alert("Failed to book surgery")
+
+      // 2️⃣ Silently add theatre charge to billing
+      try {
+        let { data: invoice } = await supabase
+          .from("invoices")
+          .select("*")
+          .eq("visit_id", visitId)
+          .maybeSingle()
+
+        // Create invoice if it doesn't exist
+        if (!invoice) {
+          const { data: newInvoice } = await supabase
+            .from("invoices")
+            .insert({
+              visit_id: visitId,
+              patient_id: patient.id,
+              invoice_number: `INV-${Date.now()}`,
+              status: "unpaid",
+              total_amount: procedureCost,
+              paid_amount: 0,
+              balance: procedureCost
+            })
+            .select()
+            .single()
+
+          invoice = newInvoice
+        }
+
+        // Add theatre item to invoice
+        if (invoice) {
+          await supabase.from("invoice_items").insert({
+            invoice_id: invoice.id,
+            item_type: "theatre_procedure",
+            item_id: booking.id,
+            description: `Theatre: ${procedure}`,
+            quantity: 1,
+            unit_price: procedureCost,
+            total_price: procedureCost
+          })
+
+          // Update invoice total
+          const { data: items } = await supabase
+            .from("invoice_items")
+            .select("total_price")
+            .eq("invoice_id", invoice.id)
+
+          const newTotal = (items || []).reduce(
+            (sum: number, item: { total_price?: number | null }) => sum + (item.total_price || 0),
+            0
+          )
+
+          await supabase
+            .from("invoices")
+            .update({
+              total_amount: newTotal,
+              balance: newTotal
+            })
+            .eq("id", invoice.id)
+        }
+      } catch (billingError) {
+        console.error("Theatre billing error (non-blocking):", billingError)
+        // Don't fail the booking if billing fails
+      }
+
+      alert("Surgery booked successfully")
+      setShowBooking(false)
+    } catch (err: any) {
+      console.error("Booking error:", err)
+      alert("Failed to book surgery")
+    }
+  }
+
+  if (loading) return <div>Loading…</div>
+
+  const triageBloodPressure = triage?.bp_systolic && triage?.bp_diastolic
+    ? `${triage.bp_systolic}/${triage.bp_diastolic}`
+    : triage?.blood_pressure || "N/A"
+
+  const triageTemp = triage?.temperature ?? "N/A"
+  const triagePulse = triage?.pulse ?? "N/A"
+  const triageSpo2 = triage?.spo2 ?? "N/A"
+  const triageWeight = triage?.weight ?? "N/A"
+
+  return (
+    <div className="max-w-5xl mx-auto bg-white shadow-xl rounded-2xl p-8 space-y-8">
+
+  {/* HEADER */}
+  <div className="border-b pb-4">
+    <h2 className="text-2xl font-bold text-blue-700">
+      {visit?.visit_no} — {patient?.first_name} {patient?.last_name}
+    </h2>
+
+    {triage && (
+      <div className="mt-2 text-sm text-gray-600 bg-blue-50 p-3 rounded-lg">
+        Temp {triageTemp}°C • Pulse {triagePulse} • BP {triageBloodPressure} • SpO₂ {triageSpo2}% • Weight {triageWeight} kg
+      </div>
+    )}
+  </div>
+
+  {/* LAB RESULTS */}
+  <div className="space-y-4">
+    <div className="flex items-center justify-between gap-4 flex-wrap border-b pb-2">
+      <div>
+        <h3 className="text-xl font-semibold text-gray-800">Lab Results</h3>
+        <p className="text-sm text-gray-500">Results linked to this visit appear here automatically.</p>
+      </div>
+      <div className="text-sm px-3 py-1 rounded-full bg-slate-100 text-slate-700">
+        {labRequests.length} request{labRequests.length === 1 ? "" : "s"}
+      </div>
+    </div>
+
+    {labRequestError ? (
+      <div className="rounded-xl border border-rose-200 bg-rose-50 p-5 text-sm text-rose-700">
+        Lab requests could not be loaded: {labRequestError}
+      </div>
+    ) : labRequests.length === 0 ? (
+      <div className="rounded-xl border border-dashed border-gray-300 p-5 text-sm text-gray-500">
+        No lab requests have been created for this visit yet.
+      </div>
+    ) : (
+      <div className="grid gap-4">
+        {labRequests.map((request: any) => {
+          const latestResult = getLatestLabResult(request)
+          const rows = parseResultRows(latestResult?.results)
+          const status = String(latestResult?.status || request.status || "pending").toLowerCase()
+          const released = ["released", "approved"].includes(status)
+          const createdAt = new Date(request.created_at).getTime()
+          const elapsedMinutes = Number.isNaN(createdAt) ? 0 : (labClock - createdAt) / 60000
+          const estimatedMinutes = getEstimatedTurnaroundMinutes(request.lab_test_master?.test_name)
+          const remainingMinutes = Math.max(0, estimatedMinutes - elapsedMinutes)
+          const overdue = !released && elapsedMinutes > estimatedMinutes
+          const statusLabel = released
+            ? "Released"
+            : status.replace(/_/g, " ").replace(/\b\w/g, (letter: string) => letter.toUpperCase())
+
+          return (
+            <div key={request.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-5 shadow-sm">
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                  <p className="text-xs uppercase tracking-[0.25em] text-slate-500">{request.lab_test_master?.test_name || "Lab Request"}</p>
+                  <h4 className="mt-1 text-lg font-semibold text-slate-900">Request {request.id}</h4>
+                  <p className="text-sm text-slate-600">Created: {formatDateTime(request.created_at)}</p>
+                </div>
+
+                <div className={`inline-flex rounded-full px-3 py-1 text-xs font-semibold ${released ? "bg-emerald-100 text-emerald-700" : overdue ? "bg-rose-100 text-rose-700" : latestResult ? "bg-amber-100 text-amber-700" : "bg-slate-200 text-slate-700"}`}>
+                  {statusLabel}
+                </div>
+              </div>
+
+              <div className="mt-3 flex items-center gap-2 text-xs">
+                <span className={`rounded-full px-2.5 py-1 font-semibold ${String(request.payment_status || "").toLowerCase() === "paid" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-800"}`}>
+                  Payment: {String(request.payment_status || "unpaid").toUpperCase()}
+                </span>
+                {String(request.payment_status || "").toLowerCase() !== "paid" && <span className="text-slate-500">Waiting for Finance approval</span>}
+              </div>
+
+              <div className="mt-4 grid gap-3 sm:grid-cols-3">
+                <div className="rounded-lg border bg-white p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Elapsed</p>
+                  <p className="mt-1 font-semibold text-slate-900">{formatDuration(elapsedMinutes)}</p>
+                </div>
+                <div className="rounded-lg border bg-white p-3">
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Estimated turnaround</p>
+                  <p className="mt-1 font-semibold text-slate-900">{formatDuration(estimatedMinutes)}</p>
+                </div>
+                <div className={`rounded-lg border p-3 ${overdue ? "border-rose-200 bg-rose-50" : "bg-white"}`}>
+                  <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Expected</p>
+                  <p className={`mt-1 font-semibold ${overdue ? "text-rose-700" : "text-slate-900"}`}>
+                    {released ? "Completed" : overdue ? `Overdue by ${formatDuration(elapsedMinutes - estimatedMinutes)}` : `${formatDuration(remainingMinutes)} remaining`}
+                  </p>
+                </div>
+              </div>
+
+              {latestResult ? (
+                <div className="mt-4 overflow-hidden rounded-xl border border-slate-200 bg-white">
+                  <div className="border-b border-slate-200 px-4 py-3 flex items-center justify-between gap-3 flex-wrap">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Result Summary</p>
+                      <p className="text-xs text-slate-500">Verified: {formatDateTime(latestResult.verified_at || latestResult.entered_at || latestResult.created_at)}</p>
+                    </div>
+                    <p className="text-xs text-slate-500">{latestResult.comments ? "Comments available" : "No comments"}</p>
+                  </div>
+
+                  {rows.length > 0 ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-sm">
+                        <thead className="bg-slate-100 text-slate-700">
+                          <tr>
+                            <th className="border-b border-slate-200 px-4 py-3 text-left font-semibold">Parameter</th>
+                            <th className="border-b border-slate-200 px-4 py-3 text-left font-semibold">Result</th>
+                            <th className="border-b border-slate-200 px-4 py-3 text-left font-semibold">Range</th>
+                            <th className="border-b border-slate-200 px-4 py-3 text-left font-semibold">Status</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((row: any, index: number) => (
+                            <tr key={`${request.id}-${index}`} className={index % 2 === 0 ? "bg-white" : "bg-slate-50/70"}>
+                              <td className="border-b border-slate-200 px-4 py-3 font-medium">{row.parameter}</td>
+                              <td className="border-b border-slate-200 px-4 py-3">{row.result}{row.units ? ` ${row.units}` : ""}</td>
+                              <td className="border-b border-slate-200 px-4 py-3 text-slate-600">{row.reference_range || "—"}</td>
+                              <td className="border-b border-slate-200 px-4 py-3">
+                                <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${row.abnormal ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"}`}>
+                                  {row.abnormal ? "Abnormal" : "Normal"}
+                                </span>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="p-4 text-sm text-slate-500">The result has been saved, but no parameter rows were returned.</div>
+                  )}
+
+                  {latestResult.comments && (
+                    <div className="border-t border-slate-200 px-4 py-3 text-sm text-slate-700">
+                      <strong>Comments:</strong> {latestResult.comments}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-4 rounded-xl border border-dashed border-slate-300 bg-white p-4 text-sm text-slate-500">
+                  No result has been entered for this request yet.
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+    )}
+  </div>
+
+  {/* CONSULTATION */}
+  <div className="space-y-4">
+    <h3 className="text-xl font-semibold text-gray-800 border-b pb-2">
+      Consultation
+    </h3>
+
+    <div className="grid gap-4">
+      <input
+        className="border rounded-lg p-3 focus:ring-2 focus:ring-blue-400 outline-none"
+        placeholder="Chief Complaint"
+        value={chiefComplaint}
+        onChange={e => setChiefComplaint(e.target.value)}
+      />
+
+      <textarea
+        className="border rounded-lg p-3 focus:ring-2 focus:ring-blue-400 outline-none min-h-[100px]"
+        placeholder="History of Present Illness"
+        value={historyOfPresentIllness}
+        onChange={e => setHPI(e.target.value)}
+      />
+
+      <textarea
+        className="border rounded-lg p-3 focus:ring-2 focus:ring-blue-400 outline-none min-h-[100px]"
+        placeholder="Examination Findings"
+        value={examination}
+        onChange={e => setExamination(e.target.value)}
+      />
+    </div>
+
+    {/* Diagnosis */}
+    <div className="space-y-3">
+      <h4 className="font-semibold text-gray-700">Diagnosis (ICD-11)</h4>
+
+      <input
+        className="border rounded-lg p-3 w-full focus:ring-2 focus:ring-blue-400 outline-none disabled:bg-gray-100"
+        placeholder={hasPendingLabs ? "Diagnosis locked until labs reviewed" : "Type diagnosis (e.g. malaria)"}
+        value={diagnosis}
+        disabled={hasPendingLabs}
+        onChange={e => {
+          setDiagnosis(e.target.value)
+          setSelectedICD(null)
+          setDiagnosisLocked(false)
+        }}
+        onKeyDown={handleDiagnosisKeyDown}
+      />
+
+      {icdResults.map((item) => (
+        <div
+          key={item.code}
+          className="p-3 border rounded-lg hover:bg-blue-50 cursor-pointer transition"
+          onClick={() => selectDiagnosis(item)}
+        >
+          {item.title}
+          <span className="text-gray-500 ml-2">({item.code})</span>
+        </div>
+      ))}
+
+      {suggestedLabs.length > 0 && (
+        <div className="text-sm bg-yellow-50 border border-yellow-200 p-3 rounded-lg">
+          Suggested Labs: {suggestedLabs.join(", ")}
+        </div>
+      )}
+
+      <textarea
+        className="border rounded-lg p-3 focus:ring-2 focus:ring-blue-400 outline-none min-h-[100px]"
+        placeholder="Doctor Notes"
+        value={notes}
+        onChange={e => setNotes(e.target.value)}
+      />
+
+      <button
+        className="bg-blue-600 text-white px-6 py-2 rounded-lg hover:bg-blue-700 transition"
+        onClick={saveConsultation}
+      >
+        Save Consultation
+      </button>
+    </div>
+  </div>
+
+  {/* LABS */}
+  <div className="space-y-4">
+  <h3 className="text-xl font-semibold border-b pb-2">
+    Send to Lab
+  </h3>
+
+  {/* Search Box */}
+  <input
+    type="text"
+    placeholder="Search lab test..."
+    className="border rounded-lg p-3 w-full focus:ring-2 focus:ring-blue-400 outline-none"
+    value={search}
+    onChange={(e) => setSearch(e.target.value)}
+  />
+
+  {/* Lab Select */}
+  {labs.map((l, i) => (
+    <select
+      key={i}
+      className="border rounded-lg p-3 w-full focus:ring-2 focus:ring-blue-400 outline-none"
+      value={l}
+      onChange={(e) => {
+        const updated = [...labs]
+        updated[i] = e.target.value
+        setLabs(updated)
+      }}
+    >
+      <option value="">Select Lab Test</option>
+
+      {filteredLabTests?.map((test) => (
+        <option key={test.id} value={test.id}>
+          {test.test_name} - KES {test.price}
+        </option>
+      ))}
+    </select>
+  ))}
+
+  <div className="flex gap-3">
+    <button
+      className="bg-gray-200 px-4 py-2 rounded-lg hover:bg-gray-300"
+      onClick={() => setLabs([...labs, ""])}
+    >
+      + Add Lab
+    </button>
+
+    <button
+      className="bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+      onClick={() => {
+        const hasSelectedTests = labs.some(l => l)
+        if (hasSelectedTests) sendLab()
+      }}
+    >
+      Send to Lab
+    </button>
+  </div>
+</div>
+
+  {/* PRESCRIPTION */}
+  <div className="space-y-6">
+  <h3 className="text-xl font-semibold border-b pb-2">
+    Prescription
+  </h3>
+
+  {/* Department Selection */}
+  <div>
+    <label className="block mb-1 font-medium">Department</label>
+    <select
+      value={selectedDepartmentId}
+      onChange={(e) => setSelectedDepartmentId(e.target.value)}
+      className="border rounded-lg p-3 w-full"
+    >
+      <option value="">Select Department</option>
+      {departments.map(dep => (
+        <option key={dep.id} value={dep.id}>
+          {dep.name}
+        </option>
+      ))}
+    </select>
+  </div>
+
+  {/* Drug Rows */}
+  {drugs.map((d, i) => (
+    <div key={i} className="grid md:grid-cols-6 gap-3 items-end">
+      
+      {/* Drug Select */}
+      <div>
+        <label className="text-xs font-medium text-gray-600">Drug</label>
+        <select
+          className="border rounded-lg p-3 w-full"
+          value={d.drug_id || ""}
+          onChange={e => {
+            const selected = allDrugs.find(dr => dr.id === e.target.value)
+            const c = [...drugs]
+            c[i].drug_id = selected.id
+            setDrugs(c)
+          }}
+        >
+          <option value="">Select Drug</option>
+          {allDrugs.map(dr => (
+            <option key={dr.id} value={dr.id}>
+              {dr.drug_name} ({dr.generic_name})
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Quantity */}
+      <div>
+        <label className="text-xs font-medium text-gray-600">Qty</label>
+        <input
+          type="number"
+          className="border rounded-lg p-3 w-full"
+          placeholder="0"
+          value={d.quantity || ""}
+          onChange={e => {
+            const c = [...drugs]
+            c[i].quantity = e.target.value
+            setDrugs(c)
+          }}
+        />
+      </div>
+
+      {/* Frequency */}
+      <div>
+        <label className="text-xs font-medium text-gray-600">Frequency</label>
+        <select
+          className="border rounded-lg p-3 w-full"
+          value={d.frequency || "OD"}
+          onChange={e => {
+            const c = [...drugs]
+            c[i].frequency = e.target.value
+            setDrugs(c)
+          }}
+        >
+          <option value="OD">Once daily</option>
+          <option value="BD">Twice daily</option>
+          <option value="TDS">3x daily</option>
+          <option value="QID">4x daily</option>
+          <option value="PRN">As needed</option>
+        </select>
+      </div>
+
+      {/* Route */}
+      <div>
+        <label className="text-xs font-medium text-gray-600">Route</label>
+        <select
+          className="border rounded-lg p-3 w-full"
+          value={d.route || "oral"}
+          onChange={e => {
+            const c = [...drugs]
+            c[i].route = e.target.value
+            setDrugs(c)
+          }}
+        >
+          <option value="oral">Oral</option>
+          <option value="iv">IV</option>
+          <option value="im">IM</option>
+          <option value="sc">SC</option>
+          <option value="topical">Topical</option>
+          <option value="inhaled">Inhaled</option>
+          <option value="rectal">Rectal</option>
+        </select>
+      </div>
+
+      {/* Special Instructions */}
+      <div>
+        <label className="text-xs font-medium text-gray-600">Instructions</label>
+        <input
+          className="border rounded-lg p-3 w-full"
+          placeholder="e.g., with food"
+          value={d.specialInstructions || ""}
+          onChange={e => {
+            const c = [...drugs]
+            c[i].specialInstructions = e.target.value
+            setDrugs(c)
+          }}
+        />
+      </div>
+
+      {/* Remove button */}
+      <button
+        className="bg-red-100 text-red-600 px-3 py-2 rounded-lg hover:bg-red-200 text-sm"
+        onClick={() => {
+          const c = drugs.filter((_, idx) => idx !== i)
+          setDrugs(c.length ? c : [{ drug_id: "", quantity: "", frequency: "", route: "oral", specialInstructions: "" }])
+        }}
+      >
+        Remove
+      </button>
+    </div>
+  ))}
+
+  {/* Actions */}
+  <div className="flex gap-3">
+    <button
+      className="bg-gray-200 px-4 py-2 rounded-lg hover:bg-gray-300"
+      onClick={() =>
+        setDrugs([
+          ...drugs,
+          { drug_id: "", quantity: "", frequency: "", route: "oral", specialInstructions: "" }
+        ])
+      }
+    >
+      + Add Drug
+    </button>
+
+    <button
+      className="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+      onClick={sendPrescription}
+    >
+      Send to Pharmacy
+    </button>
+  </div>
+</div>
+
+  {/* SURGERY MODAL */}
+  {showBooking && (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center">
+      <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md space-y-4">
+        <h3 className="text-lg font-semibold">Surgery Booking</h3>
+
+        <input
+          className="border rounded-lg p-3 w-full"
+          placeholder="Procedure"
+          value={procedure}
+          onChange={e => setProcedure(e.target.value)}
+        />
+
+        <select
+          className="border rounded-lg p-3 w-full"
+          value={urgency}
+          onChange={e => setUrgency(e.target.value)}
+        >
+          <option value="ELECTIVE">Elective</option>
+          <option value="EMERGENCY">Emergency</option>
+        </select>
+
+        <input
+          type="date"
+          className="border rounded-lg p-3 w-full"
+          value={preferredDate}
+          onChange={e => setPreferredDate(e.target.value)}
+        />
+
+        <input
+          className="border rounded-lg p-3 w-full"
+          placeholder="Estimated Duration"
+          value={estimatedDuration}
+          onChange={e => setEstimatedDuration(e.target.value)}
+        />
+
+        <div className="flex justify-end gap-3">
+          <button
+            className="bg-gray-200 px-4 py-2 rounded-lg"
+            onClick={() => setShowBooking(false)}
+          >
+            Cancel
+          </button>
+          <button
+            className="bg-blue-600 text-white px-4 py-2 rounded-lg"
+            onClick={bookForSurgery}
+          >
+            Confirm Booking
+          </button>
+        </div>
+      </div>
+    </div>
+  )}
+
+
+
+  {/* FINAL ACTIONS */}
+  <div className="flex flex-wrap gap-4 pt-6 border-t">
+    <button
+      className="bg-purple-600 text-white px-4 py-2 rounded-lg"
+      onClick={() => setShowBooking(true)}
+    >
+      Book for Surgery
+    </button>
+
+    <button
+      onClick={() => {
+        if (!patient || !patient.id) {
+          alert("Patient data not loaded")
+          return
+        }
+        router.push(`/admit?visit_id=${visit.id}&patient_id=${patient.id}`)
+      }}
+      className="bg-purple-600 text-white px-4 py-2 rounded disabled:opacity-50"
+      disabled={!patient}
+      >
+      Admit to IPD
+    </button>
+
+    <button
+      className="bg-red-600 text-white px-4 py-2 rounded-lg disabled:opacity-50"
+      onClick={closeConsultation}
+      disabled={closing}
+    >
+      {closing ? "Processing..." : "Close Consultation"}
+    </button>
+  </div>
+
+  <button
+    className="text-blue-600 hover:underline"
+    onClick={() => router.push("/(opd)/opd-queue")}
+  >
+    ← Back
+  </button>
+
+</div>
+  )
+
+}
