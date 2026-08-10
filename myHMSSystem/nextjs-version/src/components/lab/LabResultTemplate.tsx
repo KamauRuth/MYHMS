@@ -32,13 +32,16 @@ const formatDateTime = (value?: string | null) => {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return value
 
-  return date.toLocaleString()
+  return date.toLocaleString("en-KE")
 }
 
+const formatReportReference = (requestId?: string | null) =>
+  requestId ? `LAB-${requestId.replace(/-/g, "").slice(0, 10).toUpperCase()}` : "—"
+
 export function LabResultTemplate({
-  hospitalName = "LIFEPOINT HOSPITAL",
-  hospitalAddress = "123 Wellness Blvd, Suite 456, New York, NY 10001",
-  hospitalPhone = "(555) 987-6543",
+  hospitalName = process.env.NEXT_PUBLIC_HOSPITAL_NAME || "Hospital Laboratory",
+  hospitalAddress = process.env.NEXT_PUBLIC_HOSPITAL_ADDRESS,
+  hospitalPhone = process.env.NEXT_PUBLIC_HOSPITAL_PHONE,
   patientName,
   patientNumber,
   age,
@@ -64,13 +67,13 @@ export function LabResultTemplate({
             <div>
               <p className="text-xs uppercase tracking-[0.35em] text-slate-300">Medical Laboratory Report</p>
               <h2 className="mt-2 text-2xl font-bold">{hospitalName}</h2>
-              <p className="mt-1 text-sm text-slate-300">{hospitalAddress}</p>
-              <p className="text-sm text-slate-300">Tel: {hospitalPhone}</p>
+              {hospitalAddress && <p className="mt-1 max-w-md text-sm text-slate-300">{hospitalAddress}</p>}
+              {hospitalPhone && <p className="text-sm text-slate-300">Tel: {hospitalPhone}</p>}
             </div>
 
-            <div className="rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm lg:text-right">
+            <div className="min-w-0 rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm lg:w-64 lg:text-right">
               <p className="text-xs uppercase tracking-[0.25em] text-slate-300">Report Reference</p>
-              <p className="mt-1 font-semibold">{requestId || "—"}</p>
+              <p className="mt-1 font-semibold tracking-wide">{formatReportReference(requestId)}</p>
               <p className="text-slate-300">Report date: {formatDateTime(reportDate || releasedDate)}</p>
             </div>
           </div>
@@ -158,7 +161,7 @@ export function LabResultTemplate({
                 <Detail label="Report date" value={formatDateTime(reportDate || releasedDate)} />
                 <Detail label="Received" value={formatDateTime(receivedDate)} />
                 <Detail label="Released" value={formatDateTime(releasedDate)} />
-                <Detail label="Reference" value={requestId || "—"} />
+                <Detail label="Reference" value={formatReportReference(requestId)} />
               </dl>
             </div>
           </section>

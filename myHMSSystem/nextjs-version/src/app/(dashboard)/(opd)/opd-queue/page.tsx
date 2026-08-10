@@ -40,8 +40,7 @@ export default function OPDQueue() {
         `)
         .in("status", [
           VISIT_STATUS.WAITING_DOCTOR,
-          VISIT_STATUS.IN_PROGRESS,
-          VISIT_STATUS.WAITING_LAB_RESULTS
+          VISIT_STATUS.IN_PROGRESS
         ])
         .order("created_at", { ascending: true })
 

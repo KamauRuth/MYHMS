@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { Fragment, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { LabResultTemplate } from "@/components/lab/LabResultTemplate"
+import { calculateAbnormal, getClinicalTemplate, type LabTemplateParameter } from "@/lib/lab/resultTemplates"
 
 const supabase = createClient()
 
@@ -14,6 +15,12 @@ type ResultRow = {
   units?: string | null
   reference_range?: string | null
   abnormal?: boolean | null
+  section?: string
+  input_type?: "number" | "text" | "select"
+  options?: string[]
+  min?: number
+  max?: number
+  decimals?: number
 }
 
 const parseJsonArray = (value: any) => {
@@ -36,6 +43,12 @@ const buildInitialRows = (templateParameters: any, existingRows?: any[]) => {
     units: param.units || "",
     reference_range: param.reference_range || param.normal_range || "",
     abnormal: false,
+    section: param.section || "Results",
+    input_type: param.input_type || param.type || "text",
+    options: param.options || [],
+    min: param.min,
+    max: param.max,
+    decimals: param.decimals,
   }))
 
   if (!existingRows || existingRows.length === 0) {
@@ -64,6 +77,12 @@ const normalizeTemplateParameters = (template: any) => {
     parameter: param.parameter || param.field || param.name || "Unnamed Parameter",
     units: param.units || param.unit || "",
     reference_range: param.reference_range || param.normal_range || param.range || "",
+    section: param.section || "Results",
+    input_type: param.input_type || param.type || "text",
+    options: param.options || [],
+    min: param.min,
+    max: param.max,
+    decimals: param.decimals,
   }))
 }
 
@@ -107,14 +126,15 @@ export default function LabResults() {
       console.error("Failed to load request", error)
     } else {
       setRequest(data)
-      const fallbackTemplateParameters = normalizeTemplateParameters(data.lab_test_master?.template)
-      const loadedTemplate = await loadTemplate(data.lab_test_master?.id, fallbackTemplateParameters)
+      const clinicalTemplate = getClinicalTemplate(data.lab_test_master?.test_name)
+      const fallbackTemplateParameters = clinicalTemplate?.parameters || normalizeTemplateParameters(data.lab_test_master?.template)
+      const loadedTemplate = await loadTemplate(data.lab_test_master?.id, fallbackTemplateParameters, data.lab_test_master?.test_name)
       await loadExistingResults(loadedTemplate?.parameters || fallbackTemplateParameters)
     }
     setLoading(false)
   }
 
-  const loadTemplate = async (testId: string, fallbackTemplateParameters: any[] = []) => {
+  const loadTemplate = async (testId: string, fallbackTemplateParameters: any[] = [], testName?: string) => {
     setTemplateLoading(true)
     const { data, error } = await supabase
       .from("lab_result_templates")
@@ -125,12 +145,14 @@ export default function LabResults() {
       console.error("Failed to load template", error)
     } else {
       const foundTemplate = data?.[0] || null
-      const templateParameters = foundTemplate?.parameters || fallbackTemplateParameters
-      setTemplate(foundTemplate || { test_id: testId, parameters: templateParameters })
+      const clinicalTemplate = getClinicalTemplate(testName)
+      const templateParameters = clinicalTemplate?.parameters || foundTemplate?.parameters || fallbackTemplateParameters
+      setTemplate({ ...(foundTemplate || {}), test_id: testId, name: clinicalTemplate?.name, specimen: clinicalTemplate?.specimen, parameters: templateParameters })
       setResults(buildInitialRows(templateParameters))
     }
     setTemplateLoading(false)
-    return data?.[0] || { test_id: testId, parameters: fallbackTemplateParameters }
+    const clinicalTemplate = getClinicalTemplate(testName)
+    return { ...(data?.[0] || {}), test_id: testId, parameters: clinicalTemplate?.parameters || data?.[0]?.parameters || fallbackTemplateParameters }
   }
 
   const loadExistingResults = async (templateParameters?: any) => {
@@ -157,14 +179,9 @@ export default function LabResults() {
         const nextRow = { ...row, [field]: value }
 
         if (field === "result") {
-          const normalized = String(value).trim().toLowerCase()
-          const reference = String(row.reference_range || "").toLowerCase()
-          const isNumeric = normalized !== "" && !Number.isNaN(Number(normalized)) && !Number.isNaN(Number(reference.replace(/[^0-9.\-]/g, "")))
-          const abnormal = normalized === "" ? false : row.abnormal ?? false
-
           return {
             ...nextRow,
-            abnormal: isNumeric ? false : abnormal,
+            abnormal: calculateAbnormal(row as LabTemplateParameter, String(value)),
           }
         }
 
@@ -191,6 +208,10 @@ export default function LabResults() {
       return
     }
 
+    const reportReference = `LAB-${String(request.id).replace(/-/g, "").slice(0, 10).toUpperCase()}`
+    const hospitalName = process.env.NEXT_PUBLIC_HOSPITAL_NAME || "Hospital Laboratory"
+    const hospitalAddress = process.env.NEXT_PUBLIC_HOSPITAL_ADDRESS || ""
+    const hospitalPhone = process.env.NEXT_PUBLIC_HOSPITAL_PHONE || ""
     const rows = results.map((row) => ({
       ...row,
       abnormal: normalizeAbnormality(row),
@@ -238,13 +259,14 @@ export default function LabResults() {
             <div class="top">
               <div>
                 <p style="font-size:11px;letter-spacing:.35em;text-transform:uppercase;color:#cbd5e1;">Medical Laboratory Report</p>
-                <h1 style="font-size:28px;margin-top:8px;">${request.lab_test_master?.test_name || "LIFEPOINT HOSPITAL"}</h1>
-                <p style="margin-top:6px;color:#cbd5e1;">${request.lab_test_master?.department || "Laboratory"}</p>
-                <p style="color:#cbd5e1;">Report generated for ${patient?.first_name || ""} ${patient?.last_name || ""}</p>
+                <h1 style="font-size:28px;margin-top:8px;">${hospitalName}</h1>
+                ${hospitalAddress ? `<p style="margin-top:6px;color:#cbd5e1;">${hospitalAddress}</p>` : ""}
+                ${hospitalPhone ? `<p style="color:#cbd5e1;">Tel: ${hospitalPhone}</p>` : ""}
+                <p style="margin-top:6px;color:#cbd5e1;">${request.lab_test_master?.department || "Diagnostic Services"}</p>
               </div>
               <div class="meta">
                 <div style="font-size:11px;letter-spacing:.25em;text-transform:uppercase;color:#cbd5e1;">Report Reference</div>
-                <div style="margin-top:6px;font-weight:700;">${request.id}</div>
+                <div style="margin-top:6px;font-weight:700;letter-spacing:.04em;">${reportReference}</div>
                 <div style="margin-top:4px;">Released: ${new Date().toLocaleString()}</div>
               </div>
             </div>
@@ -314,6 +336,12 @@ export default function LabResults() {
   }
 
   const saveResults = async () => {
+    const incomplete = results.filter((row) => !String(row.result || "").trim())
+    if (incomplete.length > 0) {
+      alert(`Complete all required result fields. Missing: ${incomplete.map((row) => row.parameter).join(", ")}`)
+      return
+    }
+
     setSaving(true)
 
     // Check and deduct reagents for this test
@@ -438,8 +466,9 @@ export default function LabResults() {
               <h3 className="font-semibold text-slate-900">Test Results</h3>
               <p className="text-sm text-gray-500">Fill the fields below, then save and download the completed report.</p>
             </div>
-            <div className="text-sm text-gray-500">
-              {templateLoading ? "Loading template..." : template ? `Template loaded for ${request.lab_test_master?.test_name}` : "No template found"}
+            <div className="text-right text-sm text-gray-500">
+              <p>{templateLoading ? "Loading template..." : template?.name || `Template for ${request.lab_test_master?.test_name}`}</p>
+              {template?.specimen && <p className="mt-1 text-xs">Specimen: <span className="font-medium text-slate-700">{template.specimen}</span></p>}
             </div>
           </div>
 
@@ -457,34 +486,27 @@ export default function LabResults() {
                 </thead>
                 <tbody>
                   {results.map((result, index) => (
-                    <tr key={`${result.parameter}-${index}`} className={result.abnormal ? "bg-red-50" : ""}>
+                    <Fragment key={`${result.parameter}-${index}`}>
+                    {(index === 0 || results[index - 1]?.section !== result.section) && <tr><td colSpan={5} className="border-y bg-slate-800 px-3 py-2 text-xs font-bold uppercase tracking-wider text-white">{result.section || "Results"}</td></tr>}
+                    <tr className={result.abnormal ? "bg-red-50" : ""}>
                       <td className="border p-2 font-medium">{result.parameter}</td>
                       <td className="border p-2">
-                        <input
-                          type="text"
-                          value={result.result}
-                          onChange={(e) => updateResult(index, "result", e.target.value)}
-                          className="w-full border rounded px-2 py-1"
-                          placeholder={`Enter ${result.parameter}`}
-                        />
+                        {result.input_type === "select" ? (
+                          <select value={result.result} onChange={(e) => updateResult(index, "result", e.target.value)} className="w-full rounded border border-slate-300 bg-white px-2 py-2">
+                            <option value="">Select result</option>
+                            {(result.options || []).map((option: string) => <option key={option} value={option}>{option}</option>)}
+                          </select>
+                        ) : (
+                          <input type={result.input_type === "number" ? "number" : "text"} step={result.input_type === "number" ? (result.decimals ? 1 / (10 ** result.decimals) : "any") : undefined} value={result.result} onChange={(e) => updateResult(index, "result", e.target.value)} className="w-full rounded border border-slate-300 px-2 py-2 font-medium outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100" placeholder={`Enter ${result.parameter}`} />
+                        )}
                       </td>
                       <td className="border p-2">{result.units}</td>
                       <td className="border p-2">{result.reference_range}</td>
                       <td className="border p-2">
-                        <label className="inline-flex items-center gap-2 text-sm">
-                          <input
-                            type="checkbox"
-                            checked={Boolean(result.abnormal)}
-                            onChange={(e) => updateResult(index, "abnormal", e.target.checked)}
-                          />
-                          {result.abnormal ? (
-                            <span className="text-red-600 font-semibold">Abnormal</span>
-                          ) : (
-                            <span className="text-green-600">Normal</span>
-                          )}
-                        </label>
+                        {!result.result ? <span className="text-xs text-slate-400">Not entered</span> : result.abnormal ? <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">High / Low</span> : <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700">Within range</span>}
                       </td>
                     </tr>
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

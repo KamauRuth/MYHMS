@@ -6,7 +6,15 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { createClient } from "@/lib/supabase/server"
 
-type LabRequest = { id: string; status: string | null; created_at: string; payment_status: string | null }
+type LabRequest = {
+  id: string
+  status: string | null
+  created_at: string
+  payment_status: string | null
+  lab_amount: number | null
+  visits: { patients: { first_name: string; last_name: string } | null } | null
+  lab_test_master: { test_name: string; price: number | null } | null
+}
 
 async function getLabReport() {
   const supabase = await createClient()
@@ -16,7 +24,7 @@ async function getLabReport() {
   const [requestsResult, alertsResult] = await Promise.all([
     supabase
       .from("lab_requests")
-      .select("id,status,created_at,payment_status")
+      .select("id,status,created_at,payment_status,lab_amount,visits(patients(first_name,last_name)),lab_test_master(test_name,price)")
       .order("created_at", { ascending: false }),
     supabase
       .from("lab_critical_alerts")
@@ -24,7 +32,7 @@ async function getLabReport() {
       .eq("acknowledged", false),
   ])
 
-  const requests = (requestsResult.data ?? []) as LabRequest[]
+  const requests = (requestsResult.data ?? []) as unknown as LabRequest[]
   const normalized = requests.map((request) => ({ ...request, normalizedStatus: request.status?.toLowerCase() ?? "unknown" }))
   const completedStatuses = new Set(["completed", "validated", "delivered"])
   const pendingStatuses = new Set(["pending", "requested"])
@@ -78,9 +86,18 @@ export default async function LaboratoryDashboardPage() {
             {report.recent.length === 0 ? <p className="py-8 text-center text-sm text-muted-foreground">No laboratory requests recorded.</p> : (
               <div className="divide-y">
                 {report.recent.map((request) => (
-                  <div key={request.id} className="flex items-center justify-between py-3">
-                    <div><p className="font-mono text-xs font-medium">{request.id.slice(0, 8).toUpperCase()}</p><p className="text-xs text-muted-foreground">{new Date(request.created_at).toLocaleString("en-KE")}</p></div>
-                    <div className="text-right"><Badge variant="secondary" className="capitalize">{request.normalizedStatus.replace(/_/g, " ")}</Badge><p className="mt-1 text-xs capitalize text-muted-foreground">{request.payment_status || "Payment not set"}</p></div>
+                  <div key={request.id} className="grid gap-3 py-4 sm:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_auto] sm:items-center">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-foreground">
+                        {request.visits?.patients ? `${request.visits.patients.first_name} ${request.visits.patients.last_name}` : "Unknown patient"}
+                      </p>
+                      <p className="mt-1 text-xs text-muted-foreground">{new Date(request.created_at).toLocaleString("en-KE")}</p>
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium">{request.lab_test_master?.test_name || "Laboratory test"}</p>
+                      <p className="mt-1 text-xs font-semibold text-muted-foreground">KES {Number(request.lab_amount ?? request.lab_test_master?.price ?? 0).toLocaleString("en-KE")}</p>
+                    </div>
+                    <div className="sm:text-right"><Badge variant="secondary" className="capitalize">{request.normalizedStatus.replace(/_/g, " ")}</Badge><p className="mt-1 text-xs capitalize text-muted-foreground">{request.payment_status || "Payment not set"}</p></div>
                   </div>
                 ))}
               </div>
