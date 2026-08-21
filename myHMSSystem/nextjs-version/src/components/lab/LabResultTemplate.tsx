@@ -1,9 +1,14 @@
+import { calculateResultStatus } from "@/lib/lab/resultTemplates"
+
 type LabResultParam = {
   parameter: string
   result: string
   units?: string | null
   reference_range?: string | null
   abnormal?: boolean | null
+  input_type?: "number" | "text" | "select"
+  min?: number
+  max?: number
 }
 
 type LabResultTemplateProps = {
@@ -133,7 +138,9 @@ export function LabResultTemplate({
                             item.abnormal ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-700"
                           }`}
                         >
-                          {item.abnormal ? "Abnormal" : "Normal"}
+                          {item.abnormal
+                            ? ({ low: "Low", high: "High", abnormal: "Abnormal", normal: "Normal" } as const)[calculateResultStatus(item, item.result)]
+                            : "Normal"}
                         </span>
                       </td>
                     </tr>

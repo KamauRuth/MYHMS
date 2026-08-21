@@ -106,17 +106,28 @@ export function getClinicalTemplate(testName?: string | null): ClinicalLabTempla
   return templates.find((entry) => entry.matches.test(testName))?.template || null
 }
 
-export function calculateAbnormal(parameter: LabTemplateParameter, rawValue: string): boolean {
+export type LabResultStatus = "normal" | "low" | "high" | "abnormal"
+
+export function calculateResultStatus(
+  parameter: Pick<LabTemplateParameter, "input_type" | "min" | "max"> & { reference_range?: string | null },
+  rawValue: string
+): LabResultStatus {
   const value = rawValue.trim()
-  if (!value) return false
+  if (!value) return "normal"
   if (parameter.input_type === "number") {
     const numeric = Number(value)
-    if (Number.isNaN(numeric)) return false
-    return (parameter.min !== undefined && numeric < parameter.min) || (parameter.max !== undefined && numeric > parameter.max)
+    if (Number.isNaN(numeric)) return "normal"
+    if (parameter.min !== undefined && numeric < parameter.min) return "low"
+    if (parameter.max !== undefined && numeric > parameter.max) return "high"
+    return "normal"
   }
   if (parameter.input_type === "select") {
     const normal = (parameter.reference_range || "").toLowerCase()
-    return normal !== "" && value.toLowerCase() !== normal
+    return normal !== "" && value.toLowerCase() !== normal ? "abnormal" : "normal"
   }
-  return false
+  return "normal"
+}
+
+export function calculateAbnormal(parameter: LabTemplateParameter, rawValue: string): boolean {
+  return calculateResultStatus(parameter, rawValue) !== "normal"
 }

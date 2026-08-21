@@ -5,7 +5,7 @@ import { useSearchParams } from "next/navigation"
 import { useRouter } from "next/navigation"
 import { createClient } from "@/lib/supabase/client"
 import { LabResultTemplate } from "@/components/lab/LabResultTemplate"
-import { calculateAbnormal, getClinicalTemplate, type LabTemplateParameter } from "@/lib/lab/resultTemplates"
+import { calculateAbnormal, calculateResultStatus, getClinicalTemplate, type LabTemplateParameter } from "@/lib/lab/resultTemplates"
 
 const supabase = createClient()
 
@@ -199,14 +199,27 @@ export default function LabResults() {
     return false
   }
 
+  const resultStatusLabel = (row: ResultRow) => {
+    const status = calculateResultStatus(row as LabTemplateParameter, String(row.result || ""))
+    if (status === "low") return "Low"
+    if (status === "high") return "High"
+    if (status === "abnormal") return "Abnormal"
+    return "Normal"
+  }
+
   const openPrintableReport = () => {
     if (!request) return
 
-    const popup = window.open("", "_blank", "noopener,noreferrer,width=1200,height=900")
+    // `noopener` makes window.open() return null in modern browsers, so the
+    // report window could never be populated even when popups were allowed.
+    const popup = window.open("", "_blank", "width=1200,height=900")
     if (!popup) {
       alert("Please allow popups to download or print the report.")
       return
     }
+
+    // Detach the new window after retaining the reference needed to render it.
+    popup.opener = null
 
     const reportReference = `LAB-${String(request.id).replace(/-/g, "").slice(0, 10).toUpperCase()}`
     const hospitalName = process.env.NEXT_PUBLIC_HOSPITAL_NAME || "Hospital Laboratory"
@@ -303,7 +316,7 @@ export default function LabResults() {
                       <td>${row.parameter || ""}</td>
                       <td>${row.result || ""} ${row.units || ""}</td>
                       <td>${row.reference_range || "—"}</td>
-                      <td>${row.abnormal ? "Abnormal" : "Normal"}</td>
+                      <td>${resultStatusLabel(row)}</td>
                     </tr>
                   `).join("") || `<tr><td colspan="4">No result values were recorded.</td></tr>`}
                 </tbody>
@@ -344,39 +357,6 @@ export default function LabResults() {
 
     setSaving(true)
 
-    // Check and deduct reagents for this test
-    const testReagents = await getTestReagents(request.lab_test_master?.id)
-    for (const reagent of testReagents) {
-      const { data: stockData, error: stockError } = await supabase
-        .from("pharmacy_stock")
-        .select("current_stock")
-        .eq("medicine_name", reagent.reagent_name)
-        .single()
-
-      if (stockError || !stockData || stockData.current_stock < reagent.quantity_needed) {
-        alert(`Insufficient stock for reagent: ${reagent.reagent_name}`)
-        setSaving(false)
-        return
-      }
-
-      // Deduct reagent
-      await supabase
-        .from("pharmacy_stock")
-        .update({ current_stock: stockData.current_stock - reagent.quantity_needed })
-        .eq("medicine_name", reagent.reagent_name)
-
-      // Record reagent consumption
-      await supabase
-        .from("lab_reagent_consumption")
-        .insert([{
-          test_id: request.lab_test_master?.id,
-          reagent_name: reagent.reagent_name,
-          quantity_used: reagent.quantity_needed,
-          consumed_at: new Date().toISOString(),
-          consumed_by: "current_user"
-        }])
-    }
-
     const resultData = {
       request_id: requestId,
       results: JSON.stringify(results),
@@ -400,23 +380,6 @@ export default function LabResults() {
       router.push("/lab/validation")
     }
     setSaving(false)
-  }
-
-  const getTestReagents = async (testId: string) => {
-    // This would typically come from a test_reagents table
-    // For now, return mock data based on test type
-    const testReagents: any[] = []
-
-    if (request?.lab_test_master?.test_name?.toLowerCase().includes("cbc")) {
-      testReagents.push({ reagent_name: "CBC Reagent Kit", quantity_needed: 1 })
-    } else if (request?.lab_test_master?.test_name?.toLowerCase().includes("glucose")) {
-      testReagents.push({ reagent_name: "Glucose Test Strips", quantity_needed: 1 })
-    } else if (request?.lab_test_master?.test_name?.toLowerCase().includes("lft")) {
-      testReagents.push({ reagent_name: "LFT Reagent Kit", quantity_needed: 1 })
-    }
-    // Add more test-specific reagents as needed
-
-    return testReagents
   }
 
   if (loading) return <p className="p-6">Loading...</p>
@@ -503,7 +466,7 @@ export default function LabResults() {
                       <td className="border p-2">{result.units}</td>
                       <td className="border p-2">{result.reference_range}</td>
                       <td className="border p-2">
-                        {!result.result ? <span className="text-xs text-slate-400">Not entered</span> : result.abnormal ? <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">High / Low</span> : <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700">Within range</span>}
+                        {!result.result ? <span className="text-xs text-slate-400">Not entered</span> : result.abnormal ? <span className="rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700">{resultStatusLabel(result)}</span> : <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-semibold text-green-700">Within range</span>}
                       </td>
                     </tr>
                     </Fragment>
